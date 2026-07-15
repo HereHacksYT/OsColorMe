@@ -9,9 +9,11 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 app.use(express.static(path.join(__dirname, 'public')));
 
+// --- Oyun sabitleri ---
 const CATCH_DISTANCE = 2.0;
+const MAX_MOVE_DISTANCE = 0.2;      // bir hamlede maksimum yer değiştirme
+const MIN_MOVE_INTERVAL = 50;       // ms, hareket mesajları arası minimum süre
 
-// --- Oda sınıfı ---
 class Room {
   constructor(settings) {
     this.id = uuidv4().slice(0, 6);
@@ -23,7 +25,7 @@ class Room {
     this.public = settings.public;
     this.password = settings.password || '';
     this.players = [];
-    this.state = 'lobby'; // lobby | preparing | seeking | ended
+    this.state = 'lobby';
     this.seekerId = null;
     this.roundStartTime = 0;
     this.timer = null;
@@ -36,11 +38,11 @@ class Room {
       ws,
       id: playerId,
       role: this.players.length === 0 ? 'seeker' : 'hider',
-      x: 0,
-      z: 0,
+      x: 0, z: 0,
       color: 0xffffff,
       frozen: false,
       score: 0,
+      lastMoveTime: 0,     // hareket hız sınırı için
     };
     this.players.push(player);
     if (player.role === 'seeker') this.seekerId = playerId;
@@ -64,18 +66,17 @@ class Room {
     return this.players.find(p => p.ws === ws);
   }
 
-  sendToAll(msg) {
-    this.players.forEach(p => {
-      if (p.ws.readyState === WebSocket.OPEN) p.ws.send(JSON.stringify(msg));
-    });
-  }
-
-  getStateForAll() {
-    return {
+  // Kişiye özel durum (myId eklenir)
+  sendStateTo(ws) {
+    const player = this.getPlayer(ws);
+    if (!player) return;
+    const state = {
+      type: 'roomState',
       roomId: this.id,
       name: this.name,
       map: this.map,
       state: this.state,
+      myId: player.id,
       players: this.players.map(p => ({
         id: p.id,
         role: p.role,
@@ -87,15 +88,22 @@ class Room {
         score: p.score,
       })),
       scores: this.getScores(),
-      timeLeft: this.state === 'seeking' ? Math.max(0, this.seekerTime - Math.floor((Date.now() - this.roundStartTime) / 1000)) : null,
+      timeLeft: this.state === 'seeking'
+        ? Math.max(0, this.seekerTime - Math.floor((Date.now() - this.roundStartTime) / 1000))
+        : null,
     };
+    ws.send(JSON.stringify(state));
+  }
+
+  broadcastState() {
+    this.players.forEach(p => {
+      if (p.ws.readyState === WebSocket.OPEN) this.sendStateTo(p.ws);
+    });
   }
 
   getScores() {
     const s = {};
-    this.players.forEach(p => {
-      s[p.id] = p.score;
-    });
+    this.players.forEach(p => (s[p.id] = p.score));
     return s;
   }
 
@@ -107,18 +115,23 @@ class Room {
       p.frozen = false;
       p.color = 0xffffff;
     });
-    this.sendToAll({ type: 'phase', phase: 'preparing', time: this.hiderPrepTime });
+    this.broadcastState();
+    // faz bilgisi de gönder
+    this.players.forEach(p => p.ws.send(JSON.stringify({
+      type: 'phase', phase: 'preparing', time: this.hiderPrepTime
+    })));
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => this.startSeeking(), this.hiderPrepTime * 1000);
   }
 
   startSeeking() {
     this.state = 'seeking';
-    this.players.forEach(p => {
-      if (p.role === 'hider') p.frozen = true;
-    });
+    this.players.forEach(p => { if (p.role === 'hider') p.frozen = true; });
     this.roundStartTime = Date.now();
-    this.sendToAll({ type: 'phase', phase: 'seeking', time: this.seekerTime });
+    this.broadcastState();
+    this.players.forEach(p => p.ws.send(JSON.stringify({
+      type: 'phase', phase: 'seeking', time: this.seekerTime
+    })));
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => this.endRound(false), this.seekerTime * 1000);
   }
@@ -130,11 +143,10 @@ class Room {
     const seeker = this.players.find(p => p.id === this.seekerId);
     if (seeker) {
       if (caught) seeker.score += 1;
-      else
-        this.players
-          .filter(p => p.role === 'hider' && !this.eliminated.has(p.id))
-          .forEach(h => (h.score += 1));
+      else this.players.filter(p => p.role === 'hider' && !this.eliminated.has(p.id))
+             .forEach(h => (h.score += 1));
     }
+    // rol değiştir
     const hiders = this.players.filter(p => p.role === 'hider' && !this.eliminated.has(p.id));
     if (hiders.length > 0) {
       const newSeeker = hiders[Math.floor(Math.random() * hiders.length)];
@@ -143,8 +155,11 @@ class Room {
       if (oldSeeker) oldSeeker.role = 'hider';
       this.seekerId = newSeeker.id;
     }
-    this.sendToAll({ type: 'roundEnd', caught, scores: this.getScores() });
+    this.players.forEach(p => p.ws.send(JSON.stringify({
+      type: 'roundEnd', caught, scores: this.getScores()
+    })));
     this.state = 'lobby';
+    this.broadcastState();
   }
 }
 
@@ -175,37 +190,17 @@ function broadcastRoomList() {
 wss.on('connection', ws => {
   ws.on('message', raw => {
     let data;
-    try {
-      data = JSON.parse(raw);
-    } catch (e) {
-      return;
-    }
+    try { data = JSON.parse(raw); } catch (e) { return; }
 
     switch (data.type) {
-      case 'createRoom':
-        handleCreateRoom(ws, data.settings);
-        break;
-      case 'joinRoom':
-        handleJoinRoom(ws, data.roomName, data.password);
-        break;
-      case 'startGame':
-        handleStartGame(ws);
-        break;
-      case 'move':
-        handleMove(ws, data.x, data.z);
-        break;
-      case 'color':
-        handleColor(ws, data.color);
-        break;
-      case 'freeze':
-        handleFreeze(ws);
-        break;
-      case 'catch':
-        handleCatch(ws);
-        break;
-      case 'leaveRoom':
-        handleLeaveRoom(ws);
-        break;
+      case 'createRoom': handleCreateRoom(ws, data.settings); break;
+      case 'joinRoom': handleJoinRoom(ws, data.roomName, data.password); break;
+      case 'startGame': handleStartGame(ws); break;
+      case 'move': handleMove(ws, data.x, data.z); break;
+      case 'color': handleColor(ws, data.color); break;
+      case 'freeze': handleFreeze(ws); break;
+      case 'catch': handleCatch(ws); break;
+      case 'leaveRoom': handleLeaveRoom(ws); break;
     }
   });
 
@@ -222,16 +217,13 @@ function handleCreateRoom(ws, settings) {
   playersMap.set(ws, { roomId: room.id, playerId: player.id });
   ws.send(JSON.stringify({ type: 'roomCreated', roomId: room.id }));
   broadcastRoomList();
-  ws.send(JSON.stringify({ type: 'roomState', ...room.getStateForAll() }));
+  room.sendStateTo(ws); // kişiye özel durum (myId içerir)
 }
 
 function handleJoinRoom(ws, roomName, password) {
   let room = null;
   for (const r of rooms.values()) {
-    if (r.name === roomName) {
-      room = r;
-      break;
-    }
+    if (r.name === roomName) { room = r; break; }
   }
   if (!room) return ws.send(JSON.stringify({ type: 'error', message: 'Oda bulunamadı.' }));
   if (room.players.length >= room.maxPlayers) return ws.send(JSON.stringify({ type: 'error', message: 'Oda dolu.' }));
@@ -240,7 +232,7 @@ function handleJoinRoom(ws, roomName, password) {
   const player = room.addPlayer(ws);
   playersMap.set(ws, { roomId: room.id, playerId: player.id });
   ws.send(JSON.stringify({ type: 'roomJoined', roomId: room.id }));
-  room.sendToAll({ type: 'roomState', ...room.getStateForAll() });
+  room.broadcastState(); // tüm oyunculara güncel durum
   broadcastRoomList();
 }
 
@@ -263,9 +255,19 @@ function handleMove(ws, x, z) {
   const player = room.getPlayer(ws);
   if (!player) return;
   if (player.frozen && player.role === 'hider') return;
+
+  // Hile engelleme: zaman aralığı ve mesafe kontrolü
+  const now = Date.now();
+  if (now - player.lastMoveTime < MIN_MOVE_INTERVAL) return; // çok sık gönderilmiş
+  const dx = x - player.x;
+  const dz = z - player.z;
+  const dist = Math.sqrt(dx * dx + dz * dz);
+  if (dist > MAX_MOVE_DISTANCE) return; // hızlı gitmiş
+
   player.x = x;
   player.z = z;
-  room.sendToAll({ type: 'roomState', ...room.getStateForAll() });
+  player.lastMoveTime = now;
+  room.broadcastState();
 }
 
 function handleColor(ws, color) {
@@ -276,7 +278,7 @@ function handleColor(ws, color) {
   const player = room.getPlayer(ws);
   if (player && player.role === 'hider' && !player.frozen) {
     player.color = color;
-    room.sendToAll({ type: 'roomState', ...room.getStateForAll() });
+    room.broadcastState();
   }
 }
 
@@ -288,7 +290,7 @@ function handleFreeze(ws) {
   const player = room.getPlayer(ws);
   if (player && player.role === 'hider' && !player.frozen) {
     player.frozen = true;
-    room.sendToAll({ type: 'roomState', ...room.getStateForAll() });
+    room.broadcastState();
   }
 }
 
@@ -313,11 +315,9 @@ function handleCatch(ws) {
   });
 
   if (caughtAnyone) {
-    room.sendToAll({ type: 'roomState', ...room.getStateForAll() });
+    room.broadcastState();
     const hidersLeft = room.players.filter(p => p.role === 'hider' && !room.eliminated.has(p.id));
-    if (hidersLeft.length === 0) {
-      room.endRound(true);
-    }
+    if (hidersLeft.length === 0) room.endRound(true);
   } else {
     ws.send(JSON.stringify({ type: 'catchFail', message: 'Kimse yok!' }));
   }
@@ -333,7 +333,7 @@ function handleLeaveRoom(ws) {
   if (room.players.length === 0) {
     rooms.delete(room.id);
   } else {
-    room.sendToAll({ type: 'roomState', ...room.getStateForAll() });
+    room.broadcastState();
   }
   broadcastRoomList();
 }
