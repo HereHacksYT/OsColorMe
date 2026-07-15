@@ -8,7 +8,7 @@ let myPlayerId = null;
 let currentRoom = null;
 let gameState = null;
 
-// UI referansları
+// UI elemanları
 const menuDiv = document.getElementById('menu');
 const createForm = document.getElementById('create-form');
 const joinForm = document.getElementById('join-form');
@@ -19,7 +19,6 @@ const scoresDiv = document.getElementById('scores');
 const btnStart = document.getElementById('btn-start');
 const hiderButtons = document.getElementById('hider-buttons');
 const seekerButtons = document.getElementById('seeker-buttons');
-const joystickContainer = document.getElementById('joystick-container');
 
 // Three.js
 let scene, camera, renderer;
@@ -29,7 +28,10 @@ let remoteFigures = {};
 let myColor = 0xffffff;
 let frozen = false;
 
-// ---------- Bağlantıyı başlat ----------
+// Oda listesi (arama için)
+let currentRoomList = [];
+
+// ---------- Bağlantı ----------
 function connect() {
   ws = new WebSocket(wsUrl);
   ws.onopen = () => console.log('Connected');
@@ -38,7 +40,7 @@ function connect() {
 }
 connect();
 
-// ---------- Menü/Form olayları ----------
+// ---------- Menü / Form Olayları ----------
 document.getElementById('btn-create-room').onclick = () => {
   menuDiv.style.display = 'none';
   createForm.style.display = 'flex';
@@ -50,15 +52,19 @@ document.getElementById('btn-create-cancel').onclick = () => {
 document.getElementById('btn-join-room').onclick = () => {
   menuDiv.style.display = 'none';
   joinForm.style.display = 'flex';
+  // Katılma formu açıldığında oda listesini göster
+  updateJoinSearchResults('');
 };
 document.getElementById('btn-join-cancel').onclick = () => {
   joinForm.style.display = 'none';
   menuDiv.style.display = 'flex';
 };
 
+// Açık/Kapalı radyo
 document.querySelectorAll('input[name="visibility"]').forEach(r => {
   r.onchange = () => {
-    document.getElementById('password-field').style.display = r.value === 'private' ? 'block' : 'none';
+    document.getElementById('password-field').style.display =
+      r.value === 'private' ? 'block' : 'none';
   };
 });
 
@@ -89,23 +95,51 @@ document.getElementById('btn-leave').onclick = () => {
   exitToMenu();
 };
 
-btnStart.onclick = () => {
-  ws.send(JSON.stringify({ type: 'startGame' }));
-};
+btnStart.onclick = () => ws.send(JSON.stringify({ type: 'startGame' }));
 
-function exitToMenu() {
-  gameUI.style.display = 'none';
-  menuDiv.style.display = 'flex';
-  if (scene && renderer) {
-    renderer.dispose();
-    document.body.removeChild(renderer.domElement);
-  }
-  scene = null;
-  currentRoom = null;
-  myPlayerId = null;
+// Oda arama (filtreleme)
+const joinNameInput = document.getElementById('join-room-name');
+joinNameInput.addEventListener('input', () => {
+  updateJoinSearchResults(joinNameInput.value.trim().toLowerCase());
+});
+
+function updateJoinSearchResults(query) {
+  const resultsDiv = document.getElementById('search-results');
+  const filtered = currentRoomList.filter(r =>
+    r.name.toLowerCase().includes(query)
+  );
+  resultsDiv.innerHTML = filtered.map(r => `
+    <div style="padding:6px; cursor:pointer; border-bottom:1px solid #555;"
+         onclick="selectRoom('${r.name}', ${r.hasPassword})">
+      ${r.name} (${r.players}/${r.maxPlayers}) - ${r.map} ${r.hasPassword ? '🔒' : ''}
+    </div>
+  `).join('');
 }
 
-// ---------- Sunucu mesajları ----------
+// Global fonksiyon (onclick attribute ile kullanılacak)
+window.selectRoom = (roomName, hasPassword) => {
+  document.getElementById('join-room-name').value = roomName;
+  const passField = document.getElementById('join-password');
+  passField.style.display = hasPassword ? 'block' : 'none';
+  document.getElementById('search-results').innerHTML = '';
+};
+
+// Ana menüdeki oda listesi (tıklanabilir)
+function updateRoomList(rooms) {
+  currentRoomList = rooms;
+  const listDiv = document.getElementById('room-list');
+  listDiv.innerHTML = rooms.map(r => `
+    <div style="padding:4px; cursor:pointer;"
+         onclick="document.getElementById('join-room-name').value='${r.name}';
+                  document.getElementById('join-form').style.display='flex';
+                  menuDiv.style.display='none';
+                  document.getElementById('join-password').style.display='${r.hasPassword ? 'block' : 'none'}';">
+      ${r.name} (${r.players}/${r.maxPlayers}) - ${r.map} ${r.hasPassword ? '🔒' : ''}
+    </div>
+  `).join('');
+}
+
+// ---------- Sunucu Mesajları ----------
 function handleServerMessage(event) {
   const msg = JSON.parse(event.data);
   switch (msg.type) {
@@ -137,37 +171,30 @@ function handleServerMessage(event) {
   }
 }
 
-function updateRoomList(rooms) {
-  const listDiv = document.getElementById('room-list');
-  listDiv.innerHTML = rooms.map(r =>
-    `<div style="padding:4px; cursor:pointer;" onclick="document.getElementById('join-room-name').value='${r.name}'; document.getElementById('join-form').style.display='flex'; menuDiv.style.display='none';">
-      ${r.name} (${r.players}/${r.maxPlayers}) - ${r.map} ${r.hasPassword ? '🔒' : ''}
-    </div>`
-  ).join('');
-}
-
+// ---------- Oyun Durumu ----------
 function updateGameState(state) {
   if (!scene) initScene(state.map);
   gameState = state;
-  myPlayerId = state.myId || myPlayerId;
+  myPlayerId = state.myId;
   gameUI.style.display = 'block';
 
   const me = state.players.find(p => p.id === myPlayerId);
-  statusText.innerText = state.state === 'lobby' ? 'Lobide bekleniyor...' :
+  statusText.innerText =
+    state.state === 'lobby' ? 'Lobide bekleniyor...' :
     state.state === 'preparing' ? 'Hazırlanma aşaması' :
     state.state === 'seeking' ? 'Arama aşaması' : '';
   timerDiv.innerText = state.timeLeft ? `Süre: ${state.timeLeft}s` : '';
-  scoresDiv.innerText = Object.entries(state.scores).map(([id, sc]) => `Oyuncu ${id.slice(0, 4)}: ${sc}`).join(' | ');
+  scoresDiv.innerText = Object.entries(state.scores)
+    .map(([id, sc]) => `Oyuncu ${id.slice(0, 4)}: ${sc}`)
+    .join(' | ');
 
   if (me) {
     myColor = me.color;
     frozen = me.frozen;
+
     // Başlat butonu
-    if (me.role === 'seeker' && state.state === 'lobby') {
-      btnStart.style.display = 'inline-block';
-    } else {
-      btnStart.style.display = 'none';
-    }
+    btnStart.style.display = (me.role === 'seeker' && state.state === 'lobby') ? 'inline-block' : 'none';
+
     // Rol butonları
     if (me.role === 'hider' && state.state === 'preparing') {
       hiderButtons.style.display = 'flex';
@@ -181,7 +208,7 @@ function updateGameState(state) {
       hiderButtons.style.display = 'none';
       seekerButtons.style.display = 'none';
     }
-    // Figür
+
     myFigure.position.set(me.x, 0.7, me.z);
     myFigure.material.color.set(me.color);
   }
@@ -218,7 +245,19 @@ function handlePhaseChange(msg) {
   updateGameState(gameState);
 }
 
-// ---------- Three.js sahne ----------
+function exitToMenu() {
+  gameUI.style.display = 'none';
+  menuDiv.style.display = 'flex';
+  if (scene && renderer) {
+    renderer.dispose();
+    document.body.removeChild(renderer.domElement);
+  }
+  scene = null;
+  currentRoom = null;
+  myPlayerId = null;
+}
+
+// ---------- Three.js Sahne ----------
 function initScene(mapType) {
   if (scene) {
     while (scene.children.length > 0) scene.remove(scene.children[0]);
@@ -336,6 +375,9 @@ jBase.addEventListener('touchend', e => {
   jVec.x = 0; jVec.z = 0;
 });
 
+// Sabit hareket hızı (istemci tarafında da sınırlandırıldı ama sunucu zaten kontrol ediyor)
+const MOVE_SPEED = 0.12;
+
 function handleMovement() {
   if (!myFigure || !ws || ws.readyState !== WebSocket.OPEN) return;
   let dx = 0, dz = 0;
@@ -348,17 +390,21 @@ function handleMovement() {
   if (dx !== 0 || dz !== 0) {
     const len = Math.sqrt(dx * dx + dz * dz);
     dx /= len; dz /= len;
-    const speed = 0.12;
-    myFigure.position.x += dx * speed;
-    myFigure.position.z += dz * speed;
+    myFigure.position.x += dx * MOVE_SPEED;
+    myFigure.position.z += dz * MOVE_SPEED;
     const lim = 8;
     myFigure.position.x = Math.max(-lim, Math.min(lim, myFigure.position.x));
     myFigure.position.z = Math.max(-lim, Math.min(lim, myFigure.position.z));
-    ws.send(JSON.stringify({ type: 'move', x: myFigure.position.x, z: myFigure.position.z }));
+    // Hareket mesajını gönder (sunucu hile kontrolü yapacak)
+    ws.send(JSON.stringify({
+      type: 'move',
+      x: myFigure.position.x,
+      z: myFigure.position.z
+    }));
   }
 }
 
-// ---------- Butonlar ----------
+// ---------- Buton işlevleri ----------
 document.getElementById('btn-pipette').onclick = () => {
   if (!myFigure || frozen) return;
   const pos = myFigure.position;
