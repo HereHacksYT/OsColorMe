@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, touch-action: manipulation">
+  <title>OsColorMe</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="ui">
+    <div id="status">Rakip bekleniyor...</div>
+    <div id="role-info"></div>
+    <div id="timer"></div>
+    <div id="scores"></div>
+    <div id="message"></div>
+  </div>
+
+  <!-- Renk pipeti (sadece saklanan görür) -->
+  <div id="pipette-btn" style="display:none">
+    <button id="btn-pipette">🎨 Boya</button>
+    <button id="btn-freeze">🧊 Don</button>
+  </div>
+
+  <!-- Ebe yakalama butonu -->
+  <div id="seeker-btn" style="display:none">
+    <button id="btn-catch">🔍 Yakala</button>
+  </div>
+
+  <div id="joystick-container">
+    <div id="joystick-base">
+      <div id="joystick-thumb"></div>
+    </div>
+  </div>
+
+  <script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.157.0/build/three.module.js" } }
+  </script>
+  <script src="client.js" type="module"></script>
+</body>
+</html>
