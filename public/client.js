@@ -31,6 +31,10 @@ let frozen = false;
 // Oda listesi (arama için)
 let currentRoomList = [];
 
+// Sabit güncelleme aralığı (30 FPS)
+const FIXED_FRAME_MS = 1000 / 30;
+let gameInterval = null;
+
 // ---------- Bağlantı ----------
 function connect() {
   ws = new WebSocket(wsUrl);
@@ -52,7 +56,6 @@ document.getElementById('btn-create-cancel').onclick = () => {
 document.getElementById('btn-join-room').onclick = () => {
   menuDiv.style.display = 'none';
   joinForm.style.display = 'flex';
-  // Katılma formu açıldığında oda listesini göster
   updateJoinSearchResults('');
 };
 document.getElementById('btn-join-cancel').onclick = () => {
@@ -60,7 +63,6 @@ document.getElementById('btn-join-cancel').onclick = () => {
   menuDiv.style.display = 'flex';
 };
 
-// Açık/Kapalı radyo
 document.querySelectorAll('input[name="visibility"]').forEach(r => {
   r.onchange = () => {
     document.getElementById('password-field').style.display =
@@ -97,7 +99,7 @@ document.getElementById('btn-leave').onclick = () => {
 
 btnStart.onclick = () => ws.send(JSON.stringify({ type: 'startGame' }));
 
-// Oda arama (filtreleme)
+// Oda arama
 const joinNameInput = document.getElementById('join-room-name');
 joinNameInput.addEventListener('input', () => {
   updateJoinSearchResults(joinNameInput.value.trim().toLowerCase());
@@ -116,7 +118,6 @@ function updateJoinSearchResults(query) {
   `).join('');
 }
 
-// Global fonksiyon (onclick attribute ile kullanılacak)
 window.selectRoom = (roomName, hasPassword) => {
   document.getElementById('join-room-name').value = roomName;
   const passField = document.getElementById('join-password');
@@ -124,7 +125,6 @@ window.selectRoom = (roomName, hasPassword) => {
   document.getElementById('search-results').innerHTML = '';
 };
 
-// Ana menüdeki oda listesi (tıklanabilir)
 function updateRoomList(rooms) {
   currentRoomList = rooms;
   const listDiv = document.getElementById('room-list');
@@ -192,10 +192,8 @@ function updateGameState(state) {
     myColor = me.color;
     frozen = me.frozen;
 
-    // Başlat butonu
     btnStart.style.display = (me.role === 'seeker' && state.state === 'lobby') ? 'inline-block' : 'none';
 
-    // Rol butonları
     if (me.role === 'hider' && state.state === 'preparing') {
       hiderButtons.style.display = 'flex';
       seekerButtons.style.display = 'none';
@@ -248,6 +246,7 @@ function handlePhaseChange(msg) {
 function exitToMenu() {
   gameUI.style.display = 'none';
   menuDiv.style.display = 'flex';
+  if (gameInterval) clearInterval(gameInterval);
   if (scene && renderer) {
     renderer.dispose();
     document.body.removeChild(renderer.domElement);
@@ -260,6 +259,7 @@ function exitToMenu() {
 // ---------- Three.js Sahne ----------
 function initScene(mapType) {
   if (scene) {
+    clearInterval(gameInterval);
     while (scene.children.length > 0) scene.remove(scene.children[0]);
     renderer.dispose();
     document.body.removeChild(renderer.domElement);
@@ -330,7 +330,20 @@ function initScene(mapType) {
   myFigure.position.y = 0.7;
   scene.add(myFigure);
   remoteFigures = {};
-  animate();
+
+  // Sabit güncelleme döngüsünü başlat
+  if (gameInterval) clearInterval(gameInterval);
+  gameInterval = setInterval(fixedUpdate, FIXED_FRAME_MS);
+}
+
+function fixedUpdate() {
+  handleMovement();
+  if (camera && myFigure) {
+    const target = myFigure.position;
+    camera.position.lerp(new THREE.Vector3(target.x, target.y + 7, target.z + 7), 0.1);
+    camera.lookAt(target);
+  }
+  if (renderer && scene && camera) renderer.render(scene, camera);
 }
 
 // ---------- Hareket ----------
@@ -375,7 +388,6 @@ jBase.addEventListener('touchend', e => {
   jVec.x = 0; jVec.z = 0;
 });
 
-// Sabit hareket hızı (istemci tarafında da sınırlandırıldı ama sunucu zaten kontrol ediyor)
 const MOVE_SPEED = 0.12;
 
 function handleMovement() {
@@ -395,7 +407,6 @@ function handleMovement() {
     const lim = 8;
     myFigure.position.x = Math.max(-lim, Math.min(lim, myFigure.position.x));
     myFigure.position.z = Math.max(-lim, Math.min(lim, myFigure.position.z));
-    // Hareket mesajını gönder (sunucu hile kontrolü yapacak)
     ws.send(JSON.stringify({
       type: 'move',
       x: myFigure.position.x,
@@ -429,18 +440,6 @@ document.getElementById('btn-freeze').onclick = () => {
 document.getElementById('btn-catch').onclick = () => {
   ws.send(JSON.stringify({ type: 'catch' }));
 };
-
-// ---------- Animasyon ----------
-function animate() {
-  requestAnimationFrame(animate);
-  handleMovement();
-  if (camera && myFigure) {
-    const target = myFigure.position;
-    camera.position.lerp(new THREE.Vector3(target.x, target.y + 7, target.z + 7), 0.1);
-    camera.lookAt(target);
-  }
-  if (renderer && scene && camera) renderer.render(scene, camera);
-}
 
 window.addEventListener('resize', () => {
   if (camera) {
