@@ -4,184 +4,315 @@ import * as THREE from 'three';
 const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
 const wsUrl = `${protocol}://${location.host}`;
 let ws;
-let myRole = null; // 'hider' | 'seeker'
+let myPlayerId = null;
+let currentRoom = null;
+let gameState = null; // en son roomState
+
+// UI elemanları
+const menuDiv = document.getElementById('menu');
+const createForm = document.getElementById('create-form');
+const joinForm = document.getElementById('join-form');
+const gameUI = document.getElementById('game-ui');
+const statusText = document.getElementById('status-text');
+const timerDiv = document.getElementById('timer');
+const scoresDiv = document.getElementById('scores');
+const hiderButtons = document.getElementById('hider-buttons');
+const seekerButtons = document.getElementById('seeker-buttons');
+const joystickContainer = document.getElementById('joystick-container');
+
+// Three.js globalleri
+let scene, camera, renderer;
+let mapObjects = []; // renk alınacak objeler
+let myFigure, remoteFigures = {}; // id -> mesh
 let myColor = 0xffffff;
 let frozen = false;
-let phase = 'waiting'; // waiting | preparing | seeking
-let timeLeft = 0;
 
+// ---- Bağlantıyı başlat ----
 function connect() {
   ws = new WebSocket(wsUrl);
-  ws.onopen = () => setStatus('Bağlandı, rakip bekleniyor...');
-  ws.onmessage = handleMessage;
-  ws.onclose = () => { setStatus('Bağlantı koptu'); setTimeout(connect, 2000); };
+  ws.onopen = () => console.log('Connected');
+  ws.onmessage = handleServerMessage;
+  ws.onclose = () => setTimeout(connect, 2000);
 }
 connect();
 
-function setStatus(text) { document.getElementById('status').innerText = text; }
-function setRoleInfo(text) { document.getElementById('role-info').innerText = text; }
-function setTimer(text) { document.getElementById('timer').innerText = text; }
-function setScores(text) { document.getElementById('scores').innerText = text; }
-function setMessage(text) { document.getElementById('message').innerText = text; }
+// ---- Menü & Form olayları ----
+document.getElementById('btn-create-room').onclick = () => {
+  menuDiv.style.display = 'none';
+  createForm.style.display = 'flex';
+};
+document.getElementById('btn-create-cancel').onclick = () => {
+  createForm.style.display = 'none';
+  menuDiv.style.display = 'flex';
+};
+document.getElementById('btn-join-room').onclick = () => {
+  menuDiv.style.display = 'none';
+  joinForm.style.display = 'flex';
+};
+document.getElementById('btn-join-cancel').onclick = () => {
+  joinForm.style.display = 'none';
+  menuDiv.style.display = 'flex';
+};
 
-// ---------- Three.js Sahne ----------
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB);
-scene.fog = new THREE.Fog(0x87CEEB, 15, 35);
-const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 100);
-camera.position.set(0, 12, 12);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
-document.body.appendChild(renderer.domElement);
+// Açık/Kapalı radyo butonları
+document.querySelectorAll('input[name="visibility"]').forEach(r => {
+  r.onchange = () => {
+    document.getElementById('password-field').style.display = r.value === 'private' ? 'block' : 'none';
+  };
+});
 
-// Işık
-scene.add(new THREE.AmbientLight(0x445566));
-const dirLight = new THREE.DirectionalLight(0xffeedd, 1);
-dirLight.position.set(10, 20, 5);
-dirLight.castShadow = true;
-dirLight.receiveShadow = true;
-scene.add(dirLight);
+// Oda oluştur
+document.getElementById('btn-create-confirm').onclick = () => {
+  const name = document.getElementById('room-name').value.trim();
+  if (!name) return alert('Oda ismi girin.');
+  const map = document.getElementById('map-select').value;
+  const hiderTime = parseInt(document.getElementById('hider-time').value);
+  const seekerTime = parseInt(document.getElementById('seeker-time').value);
+  const maxPlayers = parseInt(document.getElementById('max-players').value);
+  const isPublic = document.querySelector('input[name="visibility"]:checked').value === 'public';
+  const password = isPublic ? '' : document.getElementById('room-password').value;
+  
+  ws.send(JSON.stringify({
+    type: 'createRoom',
+    settings: { name, map, hiderPrepTime: hiderTime, seekerTime, maxPlayers, public: isPublic, password }
+  }));
+};
 
-// Zemin
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(20, 20),
-  new THREE.MeshStandardMaterial({ color: 0x445544 })
-);
-ground.rotation.x = -Math.PI/2;
-ground.receiveShadow = true;
-scene.add(ground);
+// Odaya katıl
+document.getElementById('btn-join-confirm').onclick = () => {
+  const roomName = document.getElementById('join-room-name').value.trim();
+  if (!roomName) return;
+  const password = document.getElementById('join-password').value;
+  ws.send(JSON.stringify({ type: 'joinRoom', roomName, password }));
+};
 
-// Renkli objeler (duvarlar, kutular) – pipetle renk almak için
-const colorObjects = [];
-function createColorObjects() {
-  const geometries = [
-    { geo: new THREE.BoxGeometry(0.8, 1.5, 0.8), pos: [3, 0.75, 0], col: 0xff3333 },
-    { geo: new THREE.BoxGeometry(0.8, 1.2, 0.8), pos: [-3, 0.6, 1], col: 0x33ff33 },
-    { geo: new THREE.CylinderGeometry(0.4, 0.4, 1.5), pos: [0, 0.75, 3], col: 0x3333ff },
-    { geo: new THREE.SphereGeometry(0.6), pos: [-2, 0.6, -2], col: 0xffaa00 },
-    { geo: new THREE.BoxGeometry(1, 0.8, 1), pos: [2, 0.4, -3], col: 0xff00ff },
-    { geo: new THREE.ConeGeometry(0.5, 1.2), pos: [-1, 0.6, -3], col: 0x00ffff },
-    { geo: new THREE.BoxGeometry(0.5, 0.5, 0.5), pos: [0, 0.25, -2], col: 0xffffff },
-  ];
-  geometries.forEach(g => {
-    const mesh = new THREE.Mesh(g.geo, new THREE.MeshStandardMaterial({ color: g.col }));
-    mesh.position.set(g.pos[0], g.pos[1], g.pos[2]);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.userData = { color: g.col };
-    scene.add(mesh);
-    colorObjects.push(mesh);
-  });
-}
-createColorObjects();
+// Oda arama (anlık liste yok, manuel)
+// Katıl formunda oda ismi yazıp butona basılır.
 
-// Oyuncu figürleri
-const myFigure = new THREE.Mesh(
-  new THREE.CapsuleGeometry(0.4, 0.6, 2, 8),
-  new THREE.MeshStandardMaterial({ color: 0xffffff })
-);
-myFigure.castShadow = true;
-myFigure.receiveShadow = true;
-myFigure.position.y = 0.7;
-scene.add(myFigure);
+// Çık butonu
+document.getElementById('btn-leave').onclick = () => {
+  ws.send(JSON.stringify({ type: 'leaveRoom' }));
+  exitToMenu();
+};
 
-const remoteFigure = new THREE.Mesh(
-  new THREE.CapsuleGeometry(0.4, 0.6, 2, 8),
-  new THREE.MeshStandardMaterial({ color: 0xffffff })
-);
-remoteFigure.castShadow = true;
-remoteFigure.receiveShadow = true;
-remoteFigure.position.y = 0.7;
-remoteFigure.visible = false;
-scene.add(remoteFigure);
-
-// Kamera takip
-function updateCamera() {
-  const target = myFigure.position.clone();
-  camera.position.lerp(new THREE.Vector3(target.x, target.y+8, target.z+7), 0.1);
-  camera.lookAt(target);
+function exitToMenu() {
+  gameUI.style.display = 'none';
+  menuDiv.style.display = 'flex';
+  if (scene) {
+    // temizlik
+    renderer.dispose();
+    document.body.removeChild(renderer.domElement);
+  }
+  scene = null;
+  currentRoom = null;
+  myPlayerId = null;
 }
 
-// ---------- Mesaj işleme ----------
-function handleMessage(event) {
+// ---- Sunucudan gelen mesajlar ----
+function handleServerMessage(event) {
   const msg = JSON.parse(event.data);
-  switch(msg.type) {
-    case 'waiting':
-      setStatus('Rakip bekleniyor...');
+  switch (msg.type) {
+    case 'roomList':
+      updateRoomList(msg.rooms);
       break;
-    case 'roomAssigned':
-      myRole = msg.role;
-      setStatus('Odaya katıldın!');
-      setRoleInfo(`Rol: ${myRole === 'hider' ? '🎭 Saklanan' : '🔎 Ebe'}`);
-      updateUIForRole();
+    case 'roomCreated':
+    case 'roomJoined':
+      currentRoom = msg.roomId;
+      createForm.style.display = 'none';
+      joinForm.style.display = 'none';
+      menuDiv.style.display = 'none';
+      break;
+    case 'roomState':
+      updateGameState(msg);
       break;
     case 'phase':
-      phase = msg.phase;
-      if (msg.phase === 'preparing') {
-        setStatus('Hazırlık aşaması – Saklanan kendini gizlesin!');
-        if (myRole === 'hider') {
-          frozen = false;
-          setMessage('Renk seç ve Don!');
-        } else {
-          setMessage('Saklanan hazırlanıyor...');
-        }
-      } else if (msg.phase === 'seeking') {
-        setStatus('🔎 Ebe arıyor!');
-        setTimer(`Süre: ${msg.timeLeft || ROUND_DURATION}s`);
-        if (myRole === 'seeker') setMessage('Yakala!');
-        else setMessage('Saklan!');
-      }
-      updateUIForRole();
-      break;
-    case 'state':
-      updateState(msg.players, msg.timeLeft);
+      handlePhaseChange(msg);
       break;
     case 'roundEnd':
-      setMessage(msg.caught ? 'Yakalandın! 🎯' : 'Kurtuldun! 🎉');
-      setScores(`Skor: Saklanan ${msg.scores.hider} - Ebe ${msg.scores.seeker}`);
+      alert(msg.caught ? 'Yakalandınız!' : 'Kurtuldunuz!');
       break;
     case 'catchFail':
-      setMessage(msg.message);
-      setTimeout(() => setMessage(''), 1500);
+      alert(msg.message);
       break;
-    case 'opponentLeft':
-      setStatus('Rakip ayrıldı, sayfayı yenile.');
+    case 'error':
+      alert(msg.message);
       break;
   }
 }
 
-function updateState(players, tLeft) {
-  timeLeft = tLeft;
-  if (phase === 'seeking') setTimer(`Süre: ${timeLeft}s`);
-  players.forEach(p => {
-    if (p.role === myRole) {
-      // Kendi figürüm
-      myFigure.position.x = p.x;
-      myFigure.position.z = p.z;
-      myFigure.material.color.set(p.color);
-      myColor = p.color;
-      frozen = p.frozen;
-    } else {
-      // Rakip figürü
-      remoteFigure.position.x = p.x;
-      remoteFigure.position.z = p.z;
-      remoteFigure.material.color.set(p.color);
-      remoteFigure.visible = true;
-      // Ebe isek ve seeking fazındaysak rakip rengini gizle (beyaz göster) – saklananın rengini görmek hile olur
-      if (myRole === 'seeker' && phase === 'seeking') {
-        remoteFigure.material.color.set(0xffffff);
+function updateRoomList(rooms) {
+  const listDiv = document.getElementById('room-list');
+  listDiv.innerHTML = rooms.map(r => 
+    `<div style="padding:4px; cursor:pointer;" onclick="document.getElementById('join-room-name').value='${r.name}'; document.getElementById('join-form').style.display='flex'; menuDiv.style.display='none';">
+      ${r.name} (${r.players}/${r.maxPlayers}) - ${r.map} ${r.hasPassword?'🔒':''}
+    </div>`
+  ).join('');
+}
+
+// ---- Oyun durumu güncelleme ----
+function updateGameState(state) {
+  if (!scene) initScene(state.map); // haritayı ilk kez kur
+  gameState = state;
+  myPlayerId = state.myId;
+  
+  // UI güncelle
+  gameUI.style.display = 'block';
+  statusText.innerText = state.state === 'lobby' ? 'Lobide bekleniyor...' : 
+                         state.state === 'preparing' ? 'Hazırlanma aşaması' :
+                         state.state === 'seeking' ? 'Arama aşaması' : '';
+  timerDiv.innerText = state.timeLeft ? `Süre: ${state.timeLeft}s` : '';
+  scoresDiv.innerText = Object.entries(state.scores).map(([id, sc]) => `Oyuncu ${id.slice(0,4)}: ${sc}`).join(' | ');
+  
+  const me = state.players.find(p => p.id === myPlayerId);
+  if (me) {
+    myColor = me.color;
+    frozen = me.frozen;
+    // Buton görünürlüğü
+    if (me.role === 'hider' && state.state === 'preparing') {
+      hiderButtons.style.display = 'flex';
+      seekerButtons.style.display = 'none';
+      if (frozen) {
+        document.getElementById('btn-pipette').disabled = true;
+        document.getElementById('btn-freeze').disabled = true;
+      } else {
+        document.getElementById('btn-pipette').disabled = false;
+        document.getElementById('btn-freeze').disabled = false;
       }
+    } else if (me.role === 'seeker' && state.state === 'seeking') {
+      hiderButtons.style.display = 'none';
+      seekerButtons.style.display = 'flex';
+    } else {
+      hiderButtons.style.display = 'none';
+      seekerButtons.style.display = 'none';
     }
+    
+    // Figürümü güncelle
+    myFigure.position.set(me.x, 0.7, me.z);
+    myFigure.material.color.set(me.color);
+  }
+  
+  // Uzak oyuncuları güncelle
+  const existingIds = new Set(Object.keys(remoteFigures));
+  state.players.forEach(p => {
+    if (p.id === myPlayerId) return;
+    existingIds.delete(p.id);
+    if (!remoteFigures[p.id]) {
+      const mat = new THREE.MeshStandardMaterial({ color: p.color });
+      const geo = new THREE.CapsuleGeometry(0.4, 0.6, 2, 8);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.position.set(p.x, 0.7, p.z);
+      scene.add(mesh);
+      remoteFigures[p.id] = mesh;
+    } else {
+      const mesh = remoteFigures[p.id];
+      mesh.position.set(p.x, 0.7, p.z);
+      mesh.material.color.set(p.color);
+    }
+  });
+  // Silinmiş oyuncuları kaldır
+  existingIds.forEach(id => {
+    scene.remove(remoteFigures[id]);
+    delete remoteFigures[id];
   });
 }
 
-function updateUIForRole() {
-  document.getElementById('pipette-btn').style.display = (myRole === 'hider' && phase === 'preparing') ? 'flex' : 'none';
-  document.getElementById('seeker-btn').style.display = (myRole === 'seeker' && phase === 'seeking') ? 'flex' : 'none';
+function handlePhaseChange(msg) {
+  if (!gameState) return;
+  gameState.state = msg.phase;
+  updateGameState(gameState);
 }
 
-// ---------- Hareket ve Joystick ----------
+// ---- Three.js sahne kurulumu ----
+function initScene(mapType) {
+  if (scene) {
+    // önceki sahneyi temizle
+    while(scene.children.length > 0) scene.remove(scene.children[0]);
+    renderer.dispose();
+    document.body.removeChild(renderer.domElement);
+  }
+  
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87CEEB);
+  scene.fog = new THREE.Fog(0x87CEEB, 10, 40);
+  
+  camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 100);
+  camera.position.set(0, 10, 10);
+  
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  document.body.appendChild(renderer.domElement);
+  
+  // Işık
+  const ambient = new THREE.AmbientLight(0x445566);
+  scene.add(ambient);
+  const dirLight = new THREE.DirectionalLight(0xffeedd, 1);
+  dirLight.position.set(10, 20, 5);
+  dirLight.castShadow = true;
+  dirLight.receiveShadow = true;
+  scene.add(dirLight);
+  
+  // Zemin
+  const groundGeo = new THREE.PlaneGeometry(20, 20);
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x556B2F });
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI/2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+  
+  // Harita objeleri (renk pipeti için)
+  mapObjects = [];
+  const mapData = {
+    minecraft: [
+      { type: 'box', size: [1,1,1], pos: [0,0.5,0], color: 0x8B4513 },
+      { type: 'box', size: [2,1,2], pos: [-2,0.5,2], color: 0x228B22 },
+      { type: 'box', size: [0.8,1.5,0.8], pos: [2.5,0.75,-1], color: 0xFFD700 },
+      { type: 'sphere', radius: 0.6, pos: [-2.5,0.6,-2], color: 0xFF4500 },
+      { type: 'cylinder', radiusTop:0.4, radiusBottom:0.4, height:1.2, pos: [0,0.6,2.5], color: 0x4B0082 }
+    ],
+    ev: [
+      { type: 'box', size: [0.5,0.8,0.5], pos: [0.5,0.4,1], color: 0x8B0000 },
+      { type: 'box', size: [1,0.3,1.5], pos: [-1.5,0.15,0], color: 0x5C4033 },
+      { type: 'cylinder', radiusTop:0.3, radiusBottom:0.3, height:1.5, pos: [1.2,0.75,-1], color: 0x708090 },
+      { type: 'sphere', radius:0.5, pos: [-0.8,0.5,-1.8], color: 0xFF69B4 },
+      { type: 'box', size: [1.2,0.6,0.6], pos: [2,0.3,1.5], color: 0x556B2F }
+    ]
+  }[mapType] || [];
+  
+  mapData.forEach(obj => {
+    let mesh;
+    switch(obj.type) {
+      case 'box': mesh = new THREE.Mesh(new THREE.BoxGeometry(...obj.size), new THREE.MeshStandardMaterial({color: obj.color})); break;
+      case 'sphere': mesh = new THREE.Mesh(new THREE.SphereGeometry(obj.radius), new THREE.MeshStandardMaterial({color: obj.color})); break;
+      case 'cylinder': mesh = new THREE.Mesh(new THREE.CylinderGeometry(obj.radiusTop, obj.radiusBottom, obj.height), new THREE.MeshStandardMaterial({color: obj.color})); break;
+    }
+    mesh.position.set(obj.pos[0], obj.pos[1], obj.pos[2]);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData = { color: obj.color };
+    scene.add(mesh);
+    mapObjects.push(mesh);
+  });
+  
+  // Kendi figürüm
+  myFigure = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.4, 0.6, 2, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffffff })
+  );
+  myFigure.castShadow = true;
+  myFigure.receiveShadow = true;
+  myFigure.position.y = 0.7;
+  scene.add(myFigure);
+  
+  remoteFigures = {};
+  
+  // Animasyon döngüsünü başlat
+  animate();
+}
+
+// ---- Hareket (klavye + joystick) ----
 const keyState = { w:false, a:false, s:false, d:false };
 window.addEventListener('keydown', e => {
   switch(e.key.toLowerCase()) {
@@ -200,39 +331,39 @@ window.addEventListener('keyup', e => {
   }
 });
 
-// Dokunmatik joystick
-const joystickBase = document.getElementById('joystick-base');
-const joystickThumb = document.getElementById('joystick-thumb');
-let joystickActive = false, joystickVec = { x:0, z:0 };
-joystickBase.addEventListener('touchstart', e => { e.preventDefault(); joystickActive=true; });
-joystickBase.addEventListener('touchmove', e => {
+// Joystick dokunmatik
+const jBase = document.getElementById('joystick-base');
+const jThumb = document.getElementById('joystick-thumb');
+let jActive = false, jVec = { x:0, z:0 };
+jBase.addEventListener('touchstart', e => { e.preventDefault(); jActive=true; });
+jBase.addEventListener('touchmove', e => {
   e.preventDefault();
-  if(!joystickActive) return;
+  if(!jActive) return;
   const touch = e.touches[0];
-  const rect = joystickBase.getBoundingClientRect();
+  const rect = jBase.getBoundingClientRect();
   const cx = rect.left+rect.width/2, cy = rect.top+rect.height/2;
   let dx = touch.clientX - cx, dy = touch.clientY - cy;
   const maxR = 40, dist = Math.sqrt(dx*dx+dy*dy);
   if(dist > maxR) { dx *= maxR/dist; dy *= maxR/dist; }
-  joystickThumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-  joystickVec.x = dx/maxR;
-  joystickVec.z = dy/maxR;
+  jThumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+  jVec.x = dx/maxR;
+  jVec.z = dy/maxR;
 });
-joystickBase.addEventListener('touchend', e => {
-  e.preventDefault(); joystickActive=false;
-  joystickThumb.style.transform = 'translate(-50%, -50%)';
-  joystickVec.x=0; joystickVec.z=0;
+jBase.addEventListener('touchend', e => {
+  e.preventDefault(); jActive=false;
+  jThumb.style.transform = 'translate(-50%, -50%)';
+  jVec.x=0; jVec.z=0;
 });
 
-// Hareket fonksiyonu
 function handleMovement() {
+  if (!myFigure || !ws || ws.readyState !== WebSocket.OPEN) return;
   let dx = 0, dz = 0;
   if (keyState.w) dz -= 1;
   if (keyState.s) dz += 1;
   if (keyState.a) dx -= 1;
   if (keyState.d) dx += 1;
-  dx += joystickVec.x;
-  dz += joystickVec.z;
+  dx += jVec.x;
+  dz += jVec.z;
   if (dx !== 0 || dz !== 0) {
     const len = Math.sqrt(dx*dx+dz*dz);
     dx /= len; dz /= len;
@@ -240,75 +371,56 @@ function handleMovement() {
     myFigure.position.x += dx * speed;
     myFigure.position.z += dz * speed;
     // sınırlar
-    const lim = 7.5;
+    const lim = 8;
     myFigure.position.x = Math.max(-lim, Math.min(lim, myFigure.position.x));
     myFigure.position.z = Math.max(-lim, Math.min(lim, myFigure.position.z));
-    sendMove();
+    ws.send(JSON.stringify({ type: 'move', x: myFigure.position.x, z: myFigure.position.z }));
   }
 }
 
-let lastSend = 0;
-function sendMove() {
-  const now = Date.now();
-  if (now - lastSend > 50 && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'move',
-      x: myFigure.position.x,
-      z: myFigure.position.z
-    }));
-    lastSend = now;
-  }
-}
-
-// ---------- Butonlar ----------
-document.getElementById('btn-pipette').addEventListener('click', () => {
-  if (myRole !== 'hider' || frozen) return;
-  // Etraftaki en yakın renk objesini bul
-  let closestDist = 2.0;
-  let pickedColor = null;
-  const myPos = myFigure.position;
-  colorObjects.forEach(obj => {
-    const dist = myPos.distanceTo(obj.position);
-    if (dist < closestDist) {
-      closestDist = dist;
-      pickedColor = obj.userData.color;
-    }
+// ---- Buton işlevleri ----
+document.getElementById('btn-pipette').onclick = () => {
+  if (!myFigure || frozen) return;
+  const pos = myFigure.position;
+  let closestDist = 1.8;
+  let picked = null;
+  mapObjects.forEach(obj => {
+    const d = pos.distanceTo(obj.position);
+    if (d < closestDist) { closestDist = d; picked = obj.userData.color; }
   });
-  if (pickedColor !== null) {
-    myColor = pickedColor;
-    myFigure.material.color.set(pickedColor);
-    ws.send(JSON.stringify({ type: 'color', color: pickedColor }));
-    setMessage(`Renk alındı! #${pickedColor.toString(16)}`);
-  } else {
-    setMessage('Yakında renk yok!');
+  if (picked !== null) {
+    myColor = picked;
+    myFigure.material.color.set(picked);
+    ws.send(JSON.stringify({ type: 'color', color: picked }));
   }
-  setTimeout(() => setMessage(''), 1500);
-});
+};
 
-document.getElementById('btn-freeze').addEventListener('click', () => {
-  if (myRole !== 'hider' || frozen) return;
-  frozen = true;
+document.getElementById('btn-freeze').onclick = () => {
+  if (frozen) return;
   ws.send(JSON.stringify({ type: 'freeze' }));
-  setMessage('Dondun! Saklanma başlıyor...');
-  document.getElementById('pipette-btn').style.display = 'none';
-});
+};
 
-document.getElementById('btn-catch').addEventListener('click', () => {
-  if (myRole !== 'seeker' || phase !== 'seeking') return;
+document.getElementById('btn-catch').onclick = () => {
   ws.send(JSON.stringify({ type: 'catch' }));
-});
+};
 
-// ---------- Animasyon döngüsü ----------
+// ---- Animasyon ----
 function animate() {
   requestAnimationFrame(animate);
   handleMovement();
-  updateCamera();
-  renderer.render(scene, camera);
+  if (camera && myFigure) {
+    const target = myFigure.position;
+    camera.position.lerp(new THREE.Vector3(target.x, target.y+7, target.z+7), 0.1);
+    camera.lookAt(target);
+  }
+  if (renderer && scene && camera) renderer.render(scene, camera);
 }
-animate();
 
+// Pencere boyutu
 window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  if (camera) {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
 });
