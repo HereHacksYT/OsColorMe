@@ -9,10 +9,7 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- Oyun sabitleri ---
 const CATCH_DISTANCE = 2.0;
-const MAX_MOVE_DISTANCE = 0.2;      // bir hamlede maksimum yer değiştirme
-const MIN_MOVE_INTERVAL = 50;       // ms, hareket mesajları arası minimum süre
 
 class Room {
   constructor(settings) {
@@ -38,11 +35,11 @@ class Room {
       ws,
       id: playerId,
       role: this.players.length === 0 ? 'seeker' : 'hider',
-      x: 0, z: 0,
+      x: 0,
+      z: 0,
       color: 0xffffff,
       frozen: false,
       score: 0,
-      lastMoveTime: 0,     // hareket hız sınırı için
     };
     this.players.push(player);
     if (player.role === 'seeker') this.seekerId = playerId;
@@ -66,11 +63,10 @@ class Room {
     return this.players.find(p => p.ws === ws);
   }
 
-  // Kişiye özel durum (myId eklenir)
   sendStateTo(ws) {
     const player = this.getPlayer(ws);
     if (!player) return;
-    const state = {
+    ws.send(JSON.stringify({
       type: 'roomState',
       roomId: this.id,
       name: this.name,
@@ -91,8 +87,7 @@ class Room {
       timeLeft: this.state === 'seeking'
         ? Math.max(0, this.seekerTime - Math.floor((Date.now() - this.roundStartTime) / 1000))
         : null,
-    };
-    ws.send(JSON.stringify(state));
+    }));
   }
 
   broadcastState() {
@@ -116,7 +111,6 @@ class Room {
       p.color = 0xffffff;
     });
     this.broadcastState();
-    // faz bilgisi de gönder
     this.players.forEach(p => p.ws.send(JSON.stringify({
       type: 'phase', phase: 'preparing', time: this.hiderPrepTime
     })));
@@ -146,7 +140,6 @@ class Room {
       else this.players.filter(p => p.role === 'hider' && !this.eliminated.has(p.id))
              .forEach(h => (h.score += 1));
     }
-    // rol değiştir
     const hiders = this.players.filter(p => p.role === 'hider' && !this.eliminated.has(p.id));
     if (hiders.length > 0) {
       const newSeeker = hiders[Math.floor(Math.random() * hiders.length)];
@@ -164,7 +157,7 @@ class Room {
 }
 
 const rooms = new Map();
-const playersMap = new Map(); // ws -> { roomId, playerId }
+const playersMap = new Map();
 
 function broadcastRoomList() {
   const roomList = [];
@@ -217,7 +210,7 @@ function handleCreateRoom(ws, settings) {
   playersMap.set(ws, { roomId: room.id, playerId: player.id });
   ws.send(JSON.stringify({ type: 'roomCreated', roomId: room.id }));
   broadcastRoomList();
-  room.sendStateTo(ws); // kişiye özel durum (myId içerir)
+  room.sendStateTo(ws);
 }
 
 function handleJoinRoom(ws, roomName, password) {
@@ -232,7 +225,7 @@ function handleJoinRoom(ws, roomName, password) {
   const player = room.addPlayer(ws);
   playersMap.set(ws, { roomId: room.id, playerId: player.id });
   ws.send(JSON.stringify({ type: 'roomJoined', roomId: room.id }));
-  room.broadcastState(); // tüm oyunculara güncel durum
+  room.broadcastState();
   broadcastRoomList();
 }
 
@@ -256,17 +249,9 @@ function handleMove(ws, x, z) {
   if (!player) return;
   if (player.frozen && player.role === 'hider') return;
 
-  // Hile engelleme: zaman aralığı ve mesafe kontrolü
-  const now = Date.now();
-  if (now - player.lastMoveTime < MIN_MOVE_INTERVAL) return; // çok sık gönderilmiş
-  const dx = x - player.x;
-  const dz = z - player.z;
-  const dist = Math.sqrt(dx * dx + dz * dz);
-  if (dist > MAX_MOVE_DISTANCE) return; // hızlı gitmiş
-
+  // Hiçbir kısıtlama yok, direkt pozisyon güncellenir
   player.x = x;
   player.z = z;
-  player.lastMoveTime = now;
   room.broadcastState();
 }
 
