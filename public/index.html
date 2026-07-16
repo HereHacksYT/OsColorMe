@@ -48,11 +48,11 @@
     <button id="btn-leave">Çık</button>
   </div>
   <div id="hider-buttons" style="display:none">
-    <button id="btn-pipette">🎨 Boya</button>
+    <button id="btn-pipette">🎨 Pipetle</button>
     <button id="btn-freeze">🧊 Don</button>
   </div>
   <div id="seeker-buttons" style="display:none">
-    <button id="btn-catch">🔍 Yakala</button>
+    <button id="btn-shoot">🏹 Ateş Et</button>
   </div>
   <div id="joystick-container">
     <div id="joystick-base"><div id="joystick-thumb"></div></div>
@@ -60,25 +60,10 @@
 </div>
 
 <script>
-  // Global menü fonksiyonları
-  function showCreateForm() {
-    document.getElementById('menu').style.display = 'none';
-    document.getElementById('create-form').style.display = 'flex';
-  }
-  function hideCreateForm() {
-    document.getElementById('create-form').style.display = 'none';
-    document.getElementById('menu').style.display = 'flex';
-  }
-  function showJoinForm() {
-    document.getElementById('menu').style.display = 'none';
-    document.getElementById('join-form').style.display = 'flex';
-    if (typeof updateJoinSearchResults === 'function') updateJoinSearchResults('');
-  }
-  function hideJoinForm() {
-    document.getElementById('join-form').style.display = 'none';
-    document.getElementById('menu').style.display = 'flex';
-  }
-  // Bu fonksiyonlar client.js içinde tanımlanacak ve window.ws kullanacak
+  function showCreateForm() { document.getElementById('menu').style.display='none'; document.getElementById('create-form').style.display='flex'; }
+  function hideCreateForm() { document.getElementById('create-form').style.display='none'; document.getElementById('menu').style.display='flex'; }
+  function showJoinForm() { document.getElementById('menu').style.display='none'; document.getElementById('join-form').style.display='flex'; if(typeof updateJoinSearchResults==='function') updateJoinSearchResults(''); }
+  function hideJoinForm() { document.getElementById('join-form').style.display='none'; document.getElementById('menu').style.display='flex'; }
 </script>
 
 <script type="importmap">
