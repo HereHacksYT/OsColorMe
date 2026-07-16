@@ -189,8 +189,11 @@ function updateGameState(state) {
     .join(' | ');
 
   if (me) {
+    // Renk ve donma durumu sunucudan alınır
     myColor = me.color;
     frozen = me.frozen;
+    // Pozisyonu güncelleme! Yerel figür zaten doğru yerde
+    // myFigure.position.set(me.x, 0.7, me.z);  <-- bu satır kaldırıldı
 
     btnStart.style.display = (me.role === 'seeker' && state.state === 'lobby') ? 'inline-block' : 'none';
 
@@ -206,12 +209,9 @@ function updateGameState(state) {
       hiderButtons.style.display = 'none';
       seekerButtons.style.display = 'none';
     }
-
-    myFigure.position.set(me.x, 0.7, me.z);
-    myFigure.material.color.set(me.color);
   }
 
-  // Uzak oyuncular
+  // Uzak oyuncular (güncellenir)
   const existingIds = new Set(Object.keys(remoteFigures));
   state.players.forEach(p => {
     if (p.id === myPlayerId) return;
@@ -331,7 +331,7 @@ function initScene(mapType) {
   scene.add(myFigure);
   remoteFigures = {};
 
-  // Sabit güncelleme döngüsünü başlat
+  // Sabit güncelleme döngüsü
   if (gameInterval) clearInterval(gameInterval);
   gameInterval = setInterval(fixedUpdate, FIXED_FRAME_MS);
 }
