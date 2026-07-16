@@ -7,17 +7,16 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <!-- ANA MENÜ (Arka plan resmi eklendi) -->
+  <!-- ANA MENÜ -->
   <div id="menu" style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; color:white; gap:20px;">
     <h1>OsColorMe</h1>
-    <!-- Butonlar inline onclick ile çalışıyor -->
     <button onclick="showCreateForm()">Oda Oluştur</button>
     <button onclick="showJoinForm()">Odaya Katıl</button>
     <div id="room-list" style="max-height:200px; overflow-y:auto; width:300px; text-align:left;"></div>
   </div>
 
-  <!-- ODA OLUŞTUR FORMU -->
-  <div id="create-form" style="display:none; flex-direction:column; gap:12px; padding:20px; background:rgba(0,0,0,0.85); border-radius:12px; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:20; color:white; min-width:280px;">
+  <!-- ODA OLUŞTUR FORMU (aynı arka plan) -->
+  <div id="create-form" style="display:none; flex-direction:column; gap:12px; padding:20px; border-radius:12px; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:20; color:white; min-width:280px;">
     <h3>Oda Oluştur</h3>
     <input id="room-name" placeholder="Oda İsmi" maxlength="20" />
     <select id="map-select">
@@ -34,21 +33,21 @@
     <div id="password-field" style="display:none;">
       <input id="room-password" placeholder="Şifre" type="password" />
     </div>
-    <button onclick="createRoom()">Oluştur</button>
+    <button onclick="window.createRoom()">Oluştur</button>
     <button onclick="hideCreateForm()">İptal</button>
   </div>
 
-  <!-- ODAYA KATIL FORMU -->
-  <div id="join-form" style="display:none; flex-direction:column; gap:12px; padding:20px; background:rgba(0,0,0,0.85); border-radius:12px; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:20; color:white; min-width:280px;">
+  <!-- ODAYA KATIL FORMU (aynı arka plan) -->
+  <div id="join-form" style="display:none; flex-direction:column; gap:12px; padding:20px; border-radius:12px; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:20; color:white; min-width:280px;">
     <h3>Odaya Katıl</h3>
     <input id="join-room-name" placeholder="Oda ismi ara..." autocomplete="off" />
     <div id="search-results" style="max-height:150px; overflow-y:auto;"></div>
     <input id="join-password" placeholder="Şifre (gerekliyse)" type="password" style="display:none;" />
-    <button onclick="joinRoom()">Katıl</button>
+    <button onclick="window.joinRoom()">Katıl</button>
     <button onclick="hideJoinForm()">İptal</button>
   </div>
 
-  <!-- OYUN İÇİ UI (aynı) -->
+  <!-- OYUN İÇİ UI -->
   <div id="game-ui" style="display:none;">
     <div id="top-bar">
       <div id="status-text"></div>
@@ -69,9 +68,8 @@
     </div>
   </div>
 
-  <!-- Global fonksiyonlar (butonlar için) -->
+  <!-- Global fonksiyonlar (client.js yüklenmeden önce tanımlı) -->
   <script>
-    // Bu fonksiyonlar client.js yüklenmeden de çalışır
     function showCreateForm() {
       document.getElementById('menu').style.display = 'none';
       document.getElementById('create-form').style.display = 'flex';
@@ -83,7 +81,6 @@
     function showJoinForm() {
       document.getElementById('menu').style.display = 'none';
       document.getElementById('join-form').style.display = 'flex';
-      // Oda listesini güncelle (client.js'teki updateJoinSearchResults'i çağırmak için)
       if (typeof updateJoinSearchResults === 'function') {
         updateJoinSearchResults('');
       }
@@ -92,42 +89,6 @@
       document.getElementById('join-form').style.display = 'none';
       document.getElementById('menu').style.display = 'flex';
     }
-    function createRoom() {
-      // WebSocket üzerinden oluşturma mesajı gönderilecek (client.js'teki ws.send kullanılacak)
-      // Eğer ws henüz tanımlı değilse, uyarı ver
-      if (typeof ws !== 'undefined' && ws.readyState === WebSocket.OPEN) {
-        const name = document.getElementById('room-name').value.trim();
-        if (!name) return alert('Oda ismi girin.');
-        const map = document.getElementById('map-select').value;
-        const hiderTime = parseInt(document.getElementById('hider-time').value);
-        const seekerTime = parseInt(document.getElementById('seeker-time').value);
-        const maxPlayers = parseInt(document.getElementById('max-players').value);
-        const isPublic = document.querySelector('input[name="visibility"]:checked').value === 'public';
-        const password = isPublic ? '' : document.getElementById('room-password').value;
-        ws.send(JSON.stringify({
-          type: 'createRoom',
-          settings: { name, map, hiderPrepTime: hiderTime, seekerTime, maxPlayers, public: isPublic, password }
-        }));
-      } else {
-        alert('Bağlantı kurulamadı, lütfen bekleyin.');
-      }
-    }
-    function joinRoom() {
-      if (typeof ws !== 'undefined' && ws.readyState === WebSocket.OPEN) {
-        const roomName = document.getElementById('join-room-name').value.trim();
-        if (!roomName) return;
-        const password = document.getElementById('join-password').value;
-        ws.send(JSON.stringify({ type: 'joinRoom', roomName, password }));
-      } else {
-        alert('Bağlantı kurulamadı, lütfen bekleyin.');
-      }
-    }
-    // Seçim fonksiyonu
-    window.selectRoom = (roomName, hasPassword) => {
-      document.getElementById('join-room-name').value = roomName;
-      document.getElementById('join-password').style.display = hasPassword ? 'block' : 'none';
-      document.getElementById('search-results').innerHTML = '';
-    };
   </script>
 
   <script type="importmap">
