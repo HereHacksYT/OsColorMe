@@ -15,7 +15,7 @@
     <div id="room-list" style="max-height:200px; overflow-y:auto; width:300px; text-align:left;"></div>
   </div>
 
-  <!-- ODA OLUŞTUR FORMU (aynı arka plan) -->
+  <!-- ODA OLUŞTUR FORMU -->
   <div id="create-form" style="display:none; flex-direction:column; gap:12px; padding:20px; border-radius:12px; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:20; color:white; min-width:280px;">
     <h3>Oda Oluştur</h3>
     <input id="room-name" placeholder="Oda İsmi" maxlength="20" />
@@ -37,7 +37,7 @@
     <button onclick="hideCreateForm()">İptal</button>
   </div>
 
-  <!-- ODAYA KATIL FORMU (aynı arka plan) -->
+  <!-- ODAYA KATIL FORMU -->
   <div id="join-form" style="display:none; flex-direction:column; gap:12px; padding:20px; border-radius:12px; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:20; color:white; min-width:280px;">
     <h3>Odaya Katıl</h3>
     <input id="join-room-name" placeholder="Oda ismi ara..." autocomplete="off" />
@@ -68,7 +68,6 @@
     </div>
   </div>
 
-  <!-- Global fonksiyonlar (client.js yüklenmeden önce tanımlı) -->
   <script>
     function showCreateForm() {
       document.getElementById('menu').style.display = 'none';
