@@ -9,8 +9,12 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 app.use(express.static(path.join(__dirname, 'public')));
 
-const rooms = new Map(); // roomId -> Room
-const clients = new Map(); // ws -> { roomId, playerId }
+const CATCH_DISTANCE = 2.0;
+const SHOOT_RANGE = 6;
+const SHOOT_WIDTH = 1.2;
+
+const rooms = new Map();
+const clients = new Map();
 
 class Room {
   constructor(settings) {
@@ -18,13 +22,14 @@ class Room {
     this.name = settings.name;
     this.map = settings.map || 'minecraft';
     this.maxPlayers = settings.maxPlayers || 4;
-    this.hiderTime = settings.hiderPrepTime || 20;
+    this.hiderPrepTime = settings.hiderPrepTime || 20;
     this.seekerTime = settings.seekerTime || 45;
     this.public = settings.public !== false;
     this.password = settings.password || '';
     this.players = [];
-    this.state = 'lobby'; // lobby | preparing | seeking | ended
+    this.state = 'lobby';
     this.seekerId = null;
+    this.roundStart = 0;
     this.timer = null;
     this.eliminated = new Set();
   }
@@ -34,7 +39,8 @@ class Room {
       ws,
       id: uuidv4().slice(0, 4),
       role: this.players.length === 0 ? 'seeker' : 'hider',
-      x: 0, z: 0,
+      x: this.players.length === 0 ? 6 : 2,
+      z: this.players.length === 0 ? 6 : 2,
       color: 0xffffff,
       frozen: false,
       score: 0
@@ -55,41 +61,52 @@ class Room {
     return removed;
   }
 
-  getPlayer(ws) { return this.players.find(p => p.ws === ws); }
-
-  broadcast(msg) {
-    this.players.forEach(p => p.ws.send(JSON.stringify(msg)));
+  getPlayer(ws) {
+    return this.players.find(p => p.ws === ws);
   }
 
-  sendState() {
+  sendStateTo(ws) {
+    const player = this.getPlayer(ws);
+    if (!player) return;
+    ws.send(JSON.stringify({
+      type: 'roomState',
+      roomId: this.id,
+      name: this.name,
+      map: this.map,
+      state: this.state,
+      myId: player.id,
+      players: this.players.map(p => ({
+        id: p.id,
+        role: p.role,
+        x: p.x,
+        z: p.z,
+        color: p.color,
+        frozen: p.frozen,
+        eliminated: this.eliminated.has(p.id),
+        score: p.score,
+      })),
+      scores: this.getScores(),
+      timeLeft: this.state === 'seeking'
+        ? Math.max(0, this.seekerTime - Math.floor((Date.now() - this.roundStart) / 1000))
+        : null,
+    }));
+  }
+
+  broadcastState() {
     this.players.forEach(p => {
-      const me = this.getPlayer(p.ws);
-      p.ws.send(JSON.stringify({
-        type: 'roomState',
-        roomId: this.id,
-        name: this.name,
-        map: this.map,
-        state: this.state,
-        myId: me.id,
-        players: this.players.map(pl => ({
-          id: pl.id,
-          role: pl.role,
-          x: pl.x,
-          z: pl.z,
-          color: pl.color,
-          frozen: pl.frozen,
-          eliminated: this.eliminated.has(pl.id),
-          score: pl.score
-        })),
-        scores: this.getScores(),
-        timeLeft: this.state === 'seeking' ? Math.max(0, this.seekerTime - Math.floor((Date.now() - this.roundStart)/1000)) : null
-      }));
+      if (p.ws.readyState === WebSocket.OPEN) this.sendStateTo(p.ws);
+    });
+  }
+
+  broadcast(msg) {
+    this.players.forEach(p => {
+      if (p.ws.readyState === WebSocket.OPEN) p.ws.send(JSON.stringify(msg));
     });
   }
 
   getScores() {
     const s = {};
-    this.players.forEach(p => s[p.id] = p.score);
+    this.players.forEach(p => (s[p.id] = p.score));
     return s;
   }
 
@@ -97,32 +114,40 @@ class Room {
     if (this.state !== 'lobby') return;
     this.state = 'preparing';
     this.eliminated.clear();
-    this.players.forEach(p => { p.frozen = false; p.color = 0xffffff; });
-    this.sendState();
-    this.broadcast({ type: 'phase', phase: 'preparing', time: this.hiderTime });
-    this.timer = setTimeout(() => this.startSeeking(), this.hiderTime * 1000);
+    this.players.forEach(p => {
+      p.frozen = false;
+      p.color = 0xffffff;
+    });
+    this.broadcastState();
+    this.broadcast({ type: 'phase', phase: 'preparing', time: this.hiderPrepTime });
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.startSeeking(), this.hiderPrepTime * 1000);
   }
 
   startSeeking() {
     this.state = 'seeking';
     this.roundStart = Date.now();
-    this.players.forEach(p => { if (p.role === 'hider') p.frozen = true; });
-    this.sendState();
+    this.players.forEach(p => {
+      if (p.role === 'hider') p.frozen = true;
+    });
+    this.broadcastState();
     this.broadcast({ type: 'phase', phase: 'seeking', time: this.seekerTime });
+    if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => this.endRound(false), this.seekerTime * 1000);
   }
 
   endRound(caught) {
     if (this.state !== 'seeking') return;
-    clearTimeout(this.timer);
+    if (this.timer) clearTimeout(this.timer);
     this.state = 'ended';
     const seeker = this.players.find(p => p.id === this.seekerId);
     if (seeker) {
-      if (caught) seeker.score++;
-      else this.players.filter(p => p.role === 'hider' && !this.eliminated.has(p.id)).forEach(h => h.score++);
+      if (caught) seeker.score += 1;
+      else this.players
+        .filter(p => p.role === 'hider' && !this.eliminated.has(p.id))
+        .forEach(h => (h.score += 1));
     }
     this.broadcast({ type: 'roundEnd', caught, scores: this.getScores() });
-    // rol değiştir
     const hiders = this.players.filter(p => p.role === 'hider' && !this.eliminated.has(p.id));
     if (hiders.length > 0) {
       const newSeeker = hiders[Math.floor(Math.random() * hiders.length)];
@@ -132,28 +157,31 @@ class Room {
       this.seekerId = newSeeker.id;
     }
     this.state = 'lobby';
-    this.sendState();
+    this.broadcastState();
   }
 
   handleMove(ws, x, z) {
     const p = this.getPlayer(ws);
     if (!p || (p.frozen && p.role === 'hider')) return;
-    p.x = x; p.z = z;
-    this.sendState();
+    p.x = x;
+    p.z = z;
+    this.broadcastState();
   }
 
   handleColor(ws, color) {
     const p = this.getPlayer(ws);
-    if (!p || p.role !== 'hider' || p.frozen || this.state !== 'preparing') return;
+    if (!p || p.frozen || (p.role !== 'hider' && p.role !== 'seeker')) return;
+    if (p.role === 'seeker' && this.state !== 'preparing') return;
+    if (p.role === 'hider' && this.state !== 'preparing') return;
     p.color = color;
-    this.sendState();
+    this.broadcastState();
   }
 
   handleFreeze(ws) {
     const p = this.getPlayer(ws);
     if (!p || p.role !== 'hider' || p.frozen || this.state !== 'preparing') return;
     p.frozen = true;
-    this.sendState();
+    this.broadcastState();
   }
 
   handleCatch(ws) {
@@ -162,95 +190,168 @@ class Room {
     let caught = false;
     this.players.forEach(h => {
       if (h.role !== 'hider' || this.eliminated.has(h.id)) return;
-      if (Math.sqrt((p.x-h.x)**2 + (p.z-h.z)**2) < 2.0) {
+      const dx = p.x - h.x;
+      const dz = p.z - h.z;
+      if (Math.sqrt(dx * dx + dz * dz) < CATCH_DISTANCE) {
         this.eliminated.add(h.id);
         caught = true;
         ws.send(JSON.stringify({ type: 'catchSuccess', victimId: h.id }));
       }
     });
     if (caught) {
-      this.sendState();
-      if ([...this.eliminated].length === this.players.filter(p=>p.role==='hider').length) this.endRound(true);
-    } else ws.send(JSON.stringify({ type: 'catchFail', message: 'Kimse yok!' }));
+      this.broadcastState();
+      const hidersLeft = this.players.filter(p => p.role === 'hider' && !this.eliminated.has(p.id));
+      if (hidersLeft.length === 0) this.endRound(true);
+    } else {
+      ws.send(JSON.stringify({ type: 'catchFail', message: 'Kimse yok!' }));
+    }
+  }
+
+  handleShoot(ws, data) {
+    const p = this.getPlayer(ws);
+    if (!p || p.role !== 'seeker' || this.state !== 'seeking') return;
+    const dir = data.dir;
+    const origin = data.origin;
+    let hit = false;
+    this.players.forEach(h => {
+      if (h.role !== 'hider' || this.eliminated.has(h.id)) return;
+      const dx = h.x - origin.x;
+      const dz = h.z - origin.z;
+      const proj = dx * dir.x + dz * dir.z;
+      const perp = Math.sqrt(Math.max(0, dx * dx + dz * dz - proj * proj));
+      if (proj > 0 && proj < SHOOT_RANGE && perp < SHOOT_WIDTH) {
+        this.eliminated.add(h.id);
+        hit = true;
+        ws.send(JSON.stringify({ type: 'catchSuccess', victimId: h.id }));
+      }
+    });
+    if (hit) {
+      this.broadcastState();
+      const hidersLeft = this.players.filter(p => p.role === 'hider' && !this.eliminated.has(p.id));
+      if (hidersLeft.length === 0) this.endRound(true);
+    } else {
+      ws.send(JSON.stringify({ type: 'catchFail', message: 'Iskaladın!' }));
+    }
   }
 }
 
-// Oda listesi
 function broadcastRoomList() {
   const list = [];
-  for (const r of rooms.values()) {
-    if (r.public) list.push({ id: r.id, name: r.name, map: r.map, players: r.players.length, max: r.maxPlayers, hasPassword: !!r.password });
+  for (const room of rooms.values()) {
+    if (room.public) {
+      list.push({
+        id: room.id,
+        name: room.name,
+        map: room.map,
+        players: room.players.length,
+        max: room.maxPlayers,
+        hasPassword: !!room.password,
+      });
+    }
   }
-  wss.clients.forEach(c => c.send(JSON.stringify({ type: 'roomList', rooms: list })));
+  wss.clients.forEach(c => {
+    if (c.readyState === WebSocket.OPEN) {
+      c.send(JSON.stringify({ type: 'roomList', rooms: list }));
+    }
+  });
 }
 
 wss.on('connection', ws => {
   ws.on('message', raw => {
     let data;
-    try { data = JSON.parse(raw); } catch(e){ return; }
-    switch(data.type) {
+    try {
+      data = JSON.parse(raw);
+    } catch (e) {
+      return;
+    }
+
+    switch (data.type) {
       case 'createRoom': {
-        const s = data.settings;
-        const room = new Room(s);
+        const room = new Room(data.settings);
         rooms.set(room.id, room);
         const player = room.addPlayer(ws);
         clients.set(ws, { roomId: room.id, playerId: player.id });
         ws.send(JSON.stringify({ type: 'roomCreated', roomId: room.id }));
         broadcastRoomList();
-        room.sendState();
+        room.sendStateTo(ws);
         break;
       }
       case 'joinRoom': {
         const room = [...rooms.values()].find(r => r.name === data.roomName);
-        if (!room) return ws.send(JSON.stringify({ type: 'error', message: 'Oda bulunamadı' }));
-        if (room.players.length >= room.maxPlayers) return ws.send(JSON.stringify({ type: 'error', message: 'Oda dolu' }));
-        if (!room.public && room.password !== data.password) return ws.send(JSON.stringify({ type: 'error', message: 'Şifre yanlış' }));
+        if (!room) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Oda bulunamadı.' }));
+          break;
+        }
+        if (room.players.length >= room.maxPlayers) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Oda dolu.' }));
+          break;
+        }
+        if (!room.public && room.password !== data.password) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Yanlış şifre.' }));
+          break;
+        }
         const player = room.addPlayer(ws);
         clients.set(ws, { roomId: room.id, playerId: player.id });
         ws.send(JSON.stringify({ type: 'roomJoined', roomId: room.id }));
-        room.sendState();
+        room.broadcastState();
         broadcastRoomList();
         break;
       }
       case 'startGame': {
         const info = clients.get(ws);
-        if (!info) return;
+        if (!info) break;
         const room = rooms.get(info.roomId);
-        if (room && room.getPlayer(ws)?.role === 'seeker') room.startGame();
+        if (room && room.getPlayer(ws)?.role === 'seeker') {
+          room.startGame();
+        }
         break;
       }
       case 'move': {
         const info = clients.get(ws);
-        if (!info) return;
-        rooms.get(info.roomId)?.handleMove(ws, data.x, data.z);
+        if (!info) break;
+        const room = rooms.get(info.roomId);
+        if (room) room.handleMove(ws, data.x, data.z);
         break;
       }
       case 'color': {
         const info = clients.get(ws);
-        if (!info) return;
-        rooms.get(info.roomId)?.handleColor(ws, data.color);
+        if (!info) break;
+        const room = rooms.get(info.roomId);
+        if (room) room.handleColor(ws, data.color);
         break;
       }
       case 'freeze': {
         const info = clients.get(ws);
-        if (!info) return;
-        rooms.get(info.roomId)?.handleFreeze(ws);
+        if (!info) break;
+        const room = rooms.get(info.roomId);
+        if (room) room.handleFreeze(ws);
         break;
       }
       case 'catch': {
         const info = clients.get(ws);
-        if (!info) return;
-        rooms.get(info.roomId)?.handleCatch(ws);
+        if (!info) break;
+        const room = rooms.get(info.roomId);
+        if (room) room.handleCatch(ws);
+        break;
+      }
+      case 'shoot': {
+        const info = clients.get(ws);
+        if (!info) break;
+        const room = rooms.get(info.roomId);
+        if (room) room.handleShoot(ws, data);
         break;
       }
       case 'leaveRoom': {
         const info = clients.get(ws);
-        if (!info) return;
+        if (!info) break;
         const room = rooms.get(info.roomId);
         if (room) {
           room.removePlayer(ws);
-          if (room.players.length === 0) rooms.delete(room.id);
-          else room.sendState();
+          if (room.players.length === 0) {
+            rooms.delete(room.id);
+          } else {
+            room.broadcastState();
+          }
         }
         clients.delete(ws);
         broadcastRoomList();
@@ -258,14 +359,18 @@ wss.on('connection', ws => {
       }
     }
   });
+
   ws.on('close', () => {
     const info = clients.get(ws);
     if (info) {
       const room = rooms.get(info.roomId);
       if (room) {
         room.removePlayer(ws);
-        if (room.players.length === 0) rooms.delete(room.id);
-        else room.sendState();
+        if (room.players.length === 0) {
+          rooms.delete(room.id);
+        } else {
+          room.broadcastState();
+        }
       }
       clients.delete(ws);
       broadcastRoomList();
@@ -274,4 +379,4 @@ wss.on('connection', ws => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Sunucu ${PORT} portunda`));
+server.listen(PORT, () => console.log(`✅ Sunucu ${PORT} portunda çalışıyor`));
