@@ -7,16 +7,17 @@ let menuDiv, createForm, joinForm, gameUI, statusText, timerDiv, scoresDiv, btnS
 let scene, camera, renderer, mapObjects = [], myFigure, remoteFigures = {}, myColor = 0xffffff, frozen = false;
 let currentRoomList = [], gameInterval = null;
 let cameraAngle = Math.PI;
-let CAMERA_DISTANCE = 5;  // yakın başlangıç
-let CAMERA_HEIGHT = 3;    // daha alçak
-const CAMERA_MIN = 3;     // minimum mesafe
-const CAMERA_MAX = 15;    // maksimum mesafe
+let CAMERA_DISTANCE = 5;
+let CAMERA_HEIGHT = 3;
+const CAMERA_MIN = 3, CAMERA_MAX = 20;
 let joystickTouchId = null, cameraTouchId = null, cameraTouchStartX = 0;
 let pinchStartDist = 0;
-const WORLD_LIMIT = 18, FIXED_FRAME_MS = 1000 / 30;
+const WORLD_LIMIT = 36; // 2 kat büyüdü
+const FIXED_FRAME_MS = 1000 / 30;
 let collisionBoxes = [];
 let bullets = [];
 let raycaster = new THREE.Raycaster();
+let villagers = []; // köylüler
 
 // ======================== BUTONLAR ========================
 window.createRoom = () => {
@@ -132,30 +133,23 @@ function updateGameState(state) {
     frozen = me.frozen;
     btnStart.style.display = (me.role === 'seeker' && state.state === 'lobby') ? 'inline-block' : 'none';
     
-    // Saklananlar için yakın kamera, ebe için normal
     if (me.role === 'hider') {
-      CAMERA_DISTANCE = 5;
-      CAMERA_HEIGHT = 3;
+      CAMERA_DISTANCE = 5; CAMERA_HEIGHT = 3;
     } else {
-      CAMERA_DISTANCE = 7;
-      CAMERA_HEIGHT = 4;
+      CAMERA_DISTANCE = 8; CAMERA_HEIGHT = 5;
     }
     
     if (me.role === 'hider' && state.state === 'preparing') {
-      hiderButtons.style.display = 'flex';
-      seekerButtons.style.display = 'none';
+      hiderButtons.style.display = 'flex'; seekerButtons.style.display = 'none';
       document.getElementById('btn-pipette').disabled = frozen;
       document.getElementById('btn-freeze').disabled = frozen;
     } else if (me.role === 'seeker' && state.state === 'seeking') {
-      hiderButtons.style.display = 'none';
-      seekerButtons.style.display = 'flex';
+      hiderButtons.style.display = 'none'; seekerButtons.style.display = 'flex';
     } else {
-      hiderButtons.style.display = 'none';
-      seekerButtons.style.display = 'none';
+      hiderButtons.style.display = 'none'; seekerButtons.style.display = 'none';
     }
   }
 
-  // Uzak oyuncular
   const ids = new Set(Object.keys(remoteFigures));
   state.players.forEach(p => {
     if (p.id === myPlayerId) return;
@@ -188,28 +182,22 @@ function createMinecraftCharacter(scale = 1.0, color = 0xffffff) {
   const skinMat = new THREE.MeshStandardMaterial({ color, roughness: 0.8 });
 
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), skinMat);
-  head.position.y = 1.4;
-  group.add(head);
+  head.position.y = 1.4; group.add(head);
 
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.9, 0.3), skinMat);
-  body.position.y = 0.85;
-  group.add(body);
+  body.position.y = 0.85; group.add(body);
 
   const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.8, 0.25), skinMat);
-  leftArm.position.set(-0.45, 0.9, 0);
-  group.add(leftArm);
+  leftArm.position.set(-0.45, 0.9, 0); group.add(leftArm);
   
   const rightArm = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.8, 0.25), skinMat);
-  rightArm.position.set(0.45, 0.9, 0);
-  group.add(rightArm);
+  rightArm.position.set(0.45, 0.9, 0); group.add(rightArm);
 
   const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.7, 0.25), skinMat);
-  leftLeg.position.set(-0.2, 0.25, 0);
-  group.add(leftLeg);
+  leftLeg.position.set(-0.2, 0.25, 0); group.add(leftLeg);
   
   const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.7, 0.25), skinMat);
-  rightLeg.position.set(0.2, 0.25, 0);
-  group.add(rightLeg);
+  rightLeg.position.set(0.2, 0.25, 0); group.add(rightLeg);
 
   group.scale.set(scale, scale, scale);
   group.castShadow = true;
@@ -217,13 +205,25 @@ function createMinecraftCharacter(scale = 1.0, color = 0xffffff) {
   return group;
 }
 
+// Köylü modeli (oyuncuyla aynı ama farklı kıyafet rengi)
+function createVillager(x, z) {
+  const colors = [0xC4A46C, 0x8B4513, 0xA0522D, 0xDEB887];
+  const color = colors[Math.floor(Math.random() * colors.length)];
+  const villager = createMinecraftCharacter(1.0, color);
+  villager.position.set(x, 0, z);
+  villager.userData = { isVillager: true, color };
+  scene.add(villager);
+  villagers.push(villager);
+  return villager;
+}
+
 // ======================== SAHNE KURULUMU ========================
 function initScene(mapType) {
   if (scene) exitToMenu();
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87CEEB);
-  scene.fog = new THREE.Fog(0x87CEEB, 30, 80);
-  camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 150);
+  scene.fog = new THREE.Fog(0x87CEEB, 40, 100);
+  camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 200);
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = true;
@@ -232,19 +232,19 @@ function initScene(mapType) {
 
   scene.add(new THREE.AmbientLight(0x8B9DC3));
   const sun = new THREE.DirectionalLight(0xffeedd, 1.2);
-  sun.position.set(20, 40, 15);
+  sun.position.set(30, 60, 20);
   sun.castShadow = true;
   sun.receiveShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -30;
-  sun.shadow.camera.right = 30;
-  sun.shadow.camera.top = 30;
-  sun.shadow.camera.bottom = -30;
+  sun.shadow.mapSize.set(4096, 4096);
+  sun.shadow.camera.left = -50;
+  sun.shadow.camera.right = 50;
+  sun.shadow.camera.top = 50;
+  sun.shadow.camera.bottom = -50;
   scene.add(sun);
 
-  // Zemin
+  // Büyük zemin
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(60, 60),
+    new THREE.PlaneGeometry(80, 80),
     new THREE.MeshStandardMaterial({ color: 0x7C9D4D, roughness: 0.9 })
   );
   ground.rotation.x = -Math.PI / 2;
@@ -254,11 +254,15 @@ function initScene(mapType) {
   collisionBoxes = [];
   mapObjects = [];
   bullets = [];
+  villagers = [];
 
   buildMinecraftWorld();
 
+  // SPAWN ALANI (orta boş)
+  // Orta nokta (0,0) etrafı tamamen boş
+
   myFigure = createMinecraftCharacter(1.0, 0xffffff);
-  myFigure.position.set(2, 0, 4);
+  myFigure.position.set(0, 0, 0); // orta boş alanda başla
   scene.add(myFigure);
   remoteFigures = {};
 
@@ -273,17 +277,24 @@ function buildMinecraftWorld() {
   const leaves = 0x2D5A27;
   const log = 0x6B4226;
   const roof = 0xB53C1A;
-  const dirt = 0x8B6B4D;
-  const grass = 0x7C9D4D;
-  const flower1 = 0xFF69B4;
-  const flower2 = 0xFFD700;
-  const water = 0x3399FF;
   const path = 0xC4A46C;
+  const water = 0x3399FF;
+  const obsidian = 0x1A1A2E;
+  const portal = 0x800080;
+  const gold = 0xFFD700;
+  const diamond = 0x00FFFF;
+  const cobblestone = 0x6B6B6B;
+  const mossyCobble = 0x5A6B4A;
+  const torch = 0xFFA500;
 
-  const add = (color, x, y, z, w = 1, h = 1, d = 1) => {
+  const add = (color, x, y, z, w = 1, h = 1, d = 1, transparent = false, opacity = 1) => {
     w *= 1.5; h *= 1.5; d *= 1.5;
     const geo = new THREE.BoxGeometry(w, h, d);
-    const mat = new THREE.MeshStandardMaterial({ color, roughness: color === glass ? 0.3 : 0.9, metalness: color === glass ? 0.5 : 0.1, transparent: color === glass, opacity: color === glass ? 0.5 : 1 });
+    const mat = new THREE.MeshStandardMaterial({
+      color, roughness: color === glass ? 0.3 : 0.9,
+      metalness: color === gold || color === diamond ? 0.7 : 0.1,
+      transparent, opacity
+    });
     const b = new THREE.Mesh(geo, mat);
     b.position.set(x, y + h / 2, z);
     b.castShadow = true;
@@ -298,81 +309,93 @@ function buildMinecraftWorld() {
     return b;
   };
 
-  // === EV ZEMİNİ (taş) ===
+  // === EV (kuzeyde, ortadan uzakta) ===
+  const houseX = 12, houseZ = -12;
   for (let ix = -4; ix <= 4; ix++) {
     for (let iz = -4; iz <= 4; iz++) {
-      add(stone, ix * 1.5, 0, iz * 1.5, 1, 0.3, 1);
+      add(stone, houseX + ix * 1.5, 0, houseZ + iz * 1.5, 1, 0.3, 1);
     }
   }
-
-  // === DUVARLAR (ahşap, 3 blok yüksekliğinde) ===
   for (let i = -4; i <= 4; i++) {
-    add(wood, i * 1.5, 0.5, -4.5, 1, 3, 1); // kuzey
-    if (i < -1 || i > 0) add(wood, i * 1.5, 0.5, 4.5, 1, 3, 1); // güney (kapı boşluğu)
-    add(wood, -4.5, 0.5, i * 1.5, 1, 3, 1); // batı
-    add(wood, 4.5, 0.5, i * 1.5, 1, 3, 1); // doğu
+    add(wood, houseX + i * 1.5, 0.5, houseZ - 4.5, 1, 3, 1);
+    if (i < -1 || i > 0) add(wood, houseX + i * 1.5, 0.5, houseZ + 4.5, 1, 3, 1);
+    add(wood, houseX - 4.5, 0.5, houseZ + i * 1.5, 1, 3, 1);
+    add(wood, houseX + 4.5, 0.5, houseZ + i * 1.5, 1, 3, 1);
   }
-
-  // === PENCERELER (cam) ===
-  add(glass, -3, 1.5, -4.5, 1, 1.2, 0.2);
-  add(glass, 3, 1.5, -4.5, 1, 1.2, 0.2);
-
-  // === ÇATI (kiremit rengi) ===
+  add(glass, houseX - 3, 1.5, houseZ - 4.5, 1, 1.2, 0.2, true, 0.4);
+  add(glass, houseX + 3, 1.5, houseZ - 4.5, 1, 1.2, 0.2, true, 0.4);
   for (let ix = -5; ix <= 5; ix++) {
     for (let iz = -5; iz <= 5; iz++) {
-      add(roof, ix * 1.5, 3.5, iz * 1.5, 1, 0.5, 1);
+      add(roof, houseX + ix * 1.5, 3.5, houseZ + iz * 1.5, 1, 0.5, 1);
     }
   }
 
-  // === VERANDA (kapı önü) ===
-  for (let ix = -1; ix <= 0; ix++) {
-    add(plank, ix * 1.5, 0, 5.25, 1, 0.3, 1);
+  // === KIRIK NETHER PORTALI (doğuda) ===
+  const portalX = -15, portalZ = 0;
+  // Obsidyen çerçeve
+  add(obsidian, portalX, 0, portalZ, 0.8, 4, 0.8);
+  add(obsidian, portalX, 0, portalZ + 2.5, 0.8, 4, 0.8);
+  add(obsidian, portalX, 3.5, portalZ + 1.25, 0.8, 0.8, 2.5);
+  // Portal kısmı (mor)
+  for (let iy = 0; iy < 4; iy++) {
+    for (let iz = 0; iz < 1; iz++) {
+      add(portal, portalX, 0.5 + iy * 1.5, portalZ + 0.75 + iz * 1.5, 0.2, 1, 1, true, 0.6);
+    }
   }
+  // Kırık parçalar etrafta
+  add(obsidian, portalX + 1, 0, portalZ - 0.8, 0.5, 0.5, 0.5);
+  add(obsidian, portalX - 0.8, 0, portalZ + 3, 0.5, 0.5, 0.5);
+  add(portal, portalX + 1.2, 0, portalZ + 1.5, 0.3, 0.5, 0.3, true, 0.5);
 
-  // === PATİKA YOLU ===
-  for (let i = 0; i <= 6; i++) {
-    add(path, -0.75, 0, 4.5 + i * 1.5, 1.5, 0.1, 1.5);
-  }
+  // === MADEN (güneybatıda, yer altı) ===
+  const mineX = -10, mineZ = 10;
+  // Giriş (çukur)
+  add(cobblestone, mineX, 0, mineZ, 2, 0.3, 2);
+  add(cobblestone, mineX - 1.5, 0, mineZ, 0.5, 1.5, 0.5);
+  add(cobblestone, mineX + 1.5, 0, mineZ, 0.5, 1.5, 0.5);
+  add(cobblestone, mineX, 0, mineZ - 1.5, 0.5, 1.5, 0.5);
+  add(cobblestone, mineX, 0, mineZ + 1.5, 0.5, 1.5, 0.5);
+  // Maden içi değerli taşlar
+  add(gold, mineX - 0.5, 0.3, mineZ, 0.3, 0.3, 0.3);
+  add(diamond, mineX + 0.5, 0.3, mineZ + 0.5, 0.3, 0.3, 0.3);
+  add(gold, mineX, 0.3, mineZ - 0.5, 0.3, 0.3, 0.3);
+  // Meşaleler (turuncu küçük bloklar)
+  add(torch, mineX - 1.2, 1.2, mineZ, 0.15, 0.6, 0.15);
+  add(torch, mineX + 1.2, 1.2, mineZ, 0.15, 0.6, 0.15);
 
-  // === AĞAÇLAR (gövde + yaprak) ===
+  // === AĞAÇLAR ===
   const tree = (tx, tz) => {
-    // gövde
     add(log, tx, 0, tz, 0.6, 3, 0.6);
-    add(log, tx, 1.5, tz, 0.6, 1.5, 0.6);
-    // yapraklar (üstte büyük, yanlarda küçük)
     add(leaves, tx, 3, tz, 2.5, 2, 2.5);
     add(leaves, tx + 1, 2.5, tz, 1.5, 1.5, 1.5);
     add(leaves, tx - 1, 2.5, tz, 1.5, 1.5, 1.5);
     add(leaves, tx, 2.5, tz + 1, 1.5, 1.5, 1.5);
     add(leaves, tx, 2.5, tz - 1, 1.5, 1.5, 1.5);
   };
-  tree(-7, -7);
-  tree(7, -7);
-  tree(-7, 7);
-  tree(7, 7);
-  tree(0, 10);
-  tree(-10, 0);
-  tree(10, 0);
+  tree(-5, 0); tree(5, -5); tree(0, -8); tree(8, 3); tree(-3, 8);
+  tree(15, -15); tree(-15, -15); tree(15, 15); tree(-15, 15);
 
-  // === KÜÇÜK GÖLET ===
-  for (let ix = 7; ix <= 8; ix++) {
-    for (let iz = 7; iz <= 8; iz++) {
+  // === KÖYLÜLER (rastgele konumlarda) ===
+  const villagerPositions = [
+    { x: 3, z: 8 }, { x: -6, z: 4 }, { x: 8, z: -8 }, { x: -8, z: -4 },
+    { x: 10, z: 2 }, { x: -12, z: -8 }, { x: 14, z: 10 }, { x: -10, z: 12 }
+  ];
+  villagerPositions.forEach(pos => {
+    createVillager(pos.x, pos.z);
+  });
+
+  // === GÖLET ===
+  for (let ix = 4; ix <= 6; ix++) {
+    for (let iz = 4; iz <= 6; iz++) {
       add(water, ix * 1.5, 0, iz * 1.5, 1, 0.3, 1);
     }
   }
 
-  // === ÇİÇEKLER (küçük dekoratif bloklar) ===
-  const flowers = [
-    { x: -3, z: 7, color: flower1 },
-    { x: 3, z: 7, color: flower2 },
-    { x: 7, z: -3, color: flower1 },
-    { x: -7, z: 3, color: flower2 },
-    { x: 5, z: -7, color: flower1 },
-    { x: -5, z: -7, color: flower2 },
-  ];
-  flowers.forEach(f => {
-    const flower = add(f.color, f.x * 1.5, 0, f.z * 1.5, 0.3, 0.5, 0.3);
-  });
+  // === PATİKA YOLLARI (ortadan evlere doğru) ===
+  for (let i = 1; i <= 6; i++) {
+    add(path, 0, 0, -i * 1.5, 1.5, 0.1, 1.5);
+    add(path, i * 1.5, 0, 0, 1.5, 0.1, 1.5);
+  }
 }
 
 // ======================== ÇARPIŞMA ========================
@@ -391,7 +414,6 @@ function resolveCollisions(pos) {
   }
 }
 
-// Kamera çarpışma kontrolü
 function checkCameraCollision(camPos, targetPos) {
   raycaster.set(camPos, targetPos.clone().sub(camPos).normalize());
   const allObjects = [];
@@ -428,7 +450,6 @@ window.addEventListener('keyup', e => {
   }
 });
 
-// Fare tekerleği ile zoom
 window.addEventListener('wheel', e => {
   CAMERA_DISTANCE += e.deltaY * 0.01;
   CAMERA_DISTANCE = Math.max(CAMERA_MIN, Math.min(CAMERA_MAX, CAMERA_DISTANCE));
@@ -466,14 +487,12 @@ function initJoystick() {
       if (t.identifier === joystickTouchId) {
         joystickTouchId = null;
         jThumb.style.transform = 'translate(-50%, -50%)';
-        joyVec.x = 0;
-        joyVec.z = 0;
+        joyVec.x = 0; joyVec.z = 0;
         break;
       }
     }
   });
 
-  // Kamera sürükleme + pinch-to-zoom
   const drag = document.createElement('div');
   drag.style.cssText = 'position:absolute; top:0; right:0; width:40%; height:70%; z-index:5; touch-action:none;';
   document.body.appendChild(drag);
@@ -514,12 +533,8 @@ function initJoystick() {
   });
   drag.addEventListener('touchend', e => {
     e.preventDefault();
-    if (e.touches.length < 2) {
-      pinchStartDist = 0;
-    }
-    if (e.touches.length === 0) {
-      cameraTouchId = null;
-    }
+    if (e.touches.length < 2) pinchStartDist = 0;
+    if (e.touches.length === 0) cameraTouchId = null;
   });
 
   window.joyVec = joyVec;
@@ -542,7 +557,7 @@ function handleMovement() {
   const right = new THREE.Vector3(Math.cos(cameraAngle), 0, -Math.sin(cameraAngle));
   const move = right.multiplyScalar(dx).add(forward.multiplyScalar(dz)).normalize();
 
-  const newPos = myFigure.position.clone().add(move.multiplyScalar(0.15));
+  const newPos = myFigure.position.clone().add(move.multiplyScalar(0.2));
   newPos.x = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, newPos.x));
   newPos.z = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, newPos.z));
   resolveCollisions(newPos);
@@ -561,7 +576,7 @@ function shoot() {
   );
   bullet.position.copy(startPos);
   scene.add(bullet);
-  bullets.push({ mesh: bullet, velocity: dir.multiplyScalar(0.5), life: 60 });
+  bullets.push({ mesh: bullet, velocity: dir.multiplyScalar(0.7), life: 80 });
   window.ws.send(JSON.stringify({ type: 'shoot', dir: { x: dir.x, z: dir.z }, origin: { x: startPos.x, z: startPos.z } }));
 }
 
@@ -569,10 +584,15 @@ function shoot() {
 function pipette() {
   if (!myFigure || frozen) return;
   const pos = myFigure.position;
-  let closest = 2.5, color = null;
+  let closest = 3, color = null;
   mapObjects.forEach(o => {
     const d = pos.distanceTo(o.position);
     if (d < closest) { closest = d; color = o.userData.color; }
+  });
+  // Köylülerden de renk al
+  villagers.forEach(v => {
+    const d = pos.distanceTo(v.position);
+    if (d < closest) { closest = d; color = v.userData.color; }
   });
   if (color !== null) {
     myColor = color;
@@ -585,27 +605,26 @@ function pipette() {
 function fixedUpdate() {
   handleMovement();
   
-  // Mermileri güncelle
+  // Mermiler
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
     b.mesh.position.add(b.velocity);
     b.life--;
-    if (b.life <= 0) {
-      scene.remove(b.mesh);
-      bullets.splice(i, 1);
-    }
+    if (b.life <= 0) { scene.remove(b.mesh); bullets.splice(i, 1); }
   }
 
-  // Kamera güncelle (duvar çarpışması ile)
+  // Köylüler hafifçe sallansın
+  villagers.forEach(v => {
+    v.position.y = Math.sin(Date.now() * 0.003 + v.position.x) * 0.05;
+  });
+
+  // Kamera
   if (camera && myFigure) {
     const target = myFigure.position.clone().add(new THREE.Vector3(0, 1.2, 0));
     const ox = Math.sin(cameraAngle) * CAMERA_DISTANCE;
     const oz = Math.cos(cameraAngle) * CAMERA_DISTANCE;
     let desiredPos = new THREE.Vector3(target.x + ox, target.y + CAMERA_HEIGHT, target.z + oz);
-    
-    // Duvar çarpışma kontrolü
     desiredPos = checkCameraCollision(desiredPos, target);
-    
     camera.position.lerp(desiredPos, 0.2);
     camera.lookAt(target);
   }
@@ -615,8 +634,4 @@ function fixedUpdate() {
 
 window.addEventListener('resize', () => {
   if (camera) {
-    camera.aspect = innerWidth / innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth, innerHeight);
-  }
-});
+    camera.aspect =
