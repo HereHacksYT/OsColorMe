@@ -1,98 +1,89 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, touch-action: manipulation" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, touch-action: manipulation"/>
   <title>OsColorMe</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
-  <!-- ANA MENÜ -->
-  <div id="menu" style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; color:white; gap:20px;">
-    <h1>OsColorMe</h1>
-    <button onclick="showCreateForm()">Oda Oluştur</button>
-    <button onclick="showJoinForm()">Odaya Katıl</button>
-    <div id="room-list" style="max-height:200px; overflow-y:auto; width:300px; text-align:left;"></div>
+<div id="menu">
+  <h1>OsColorMe</h1>
+  <button onclick="showCreateForm()">Oda Oluştur</button>
+  <button onclick="showJoinForm()">Odaya Katıl</button>
+  <div id="room-list"></div>
+</div>
+
+<div id="create-form" style="display:none">
+  <h3>Oda Oluştur</h3>
+  <input id="room-name" placeholder="Oda İsmi" maxlength="20"/>
+  <select id="map-select"><option value="minecraft">Minecraft</option><option value="ev">Ev</option></select>
+  <label>Hazırlık Süresi (sn): <input id="hider-time" type="number" value="20" min="10" max="120"/></label>
+  <label>Arama Süresi (sn): <input id="seeker-time" type="number" value="45" min="20" max="180"/></label>
+  <label>Max Oyuncu: <input id="max-players" type="number" value="4" min="2" max="8"/></label>
+  <div>
+    <label>Açık: <input type="radio" name="visibility" value="public" checked/></label>
+    <label>Kapalı: <input type="radio" name="visibility" value="private"/></label>
   </div>
+  <div id="password-field" style="display:none"><input id="room-password" placeholder="Şifre" type="password"/></div>
+  <button onclick="createRoom()">Oluştur</button>
+  <button onclick="hideCreateForm()">İptal</button>
+</div>
 
-  <!-- ODA OLUŞTUR FORMU -->
-  <div id="create-form" style="display:none; flex-direction:column; gap:12px; padding:20px; border-radius:12px; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:20; color:white; min-width:280px;">
-    <h3>Oda Oluştur</h3>
-    <input id="room-name" placeholder="Oda İsmi" maxlength="20" />
-    <select id="map-select">
-      <option value="minecraft">Minecraft</option>
-      <option value="ev">Ev</option>
-    </select>
-    <div><label>Hazırlık Süresi (sn): <input id="hider-time" type="number" value="20" min="10" max="120" /></label></div>
-    <div><label>Arama Süresi (sn): <input id="seeker-time" type="number" value="45" min="20" max="180" /></label></div>
-    <div><label>Max Oyuncu: <input id="max-players" type="number" value="4" min="2" max="8" /></label></div>
-    <div>
-      <label>Açık: <input type="radio" name="visibility" value="public" checked /></label>
-      <label>Kapalı: <input type="radio" name="visibility" value="private" /></label>
-    </div>
-    <div id="password-field" style="display:none;">
-      <input id="room-password" placeholder="Şifre" type="password" />
-    </div>
-    <button onclick="window.createRoom()">Oluştur</button>
-    <button onclick="hideCreateForm()">İptal</button>
+<div id="join-form" style="display:none">
+  <h3>Odaya Katıl</h3>
+  <input id="join-room-name" placeholder="Oda ismi ara..." autocomplete="off"/>
+  <div id="search-results"></div>
+  <input id="join-password" placeholder="Şifre (gerekliyse)" type="password" style="display:none"/>
+  <button onclick="joinRoom()">Katıl</button>
+  <button onclick="hideJoinForm()">İptal</button>
+</div>
+
+<div id="game-ui" style="display:none">
+  <div id="top-bar">
+    <span id="status-text"></span>
+    <span id="timer"></span>
+    <span id="scores"></span>
+    <button id="btn-start" style="display:none">Başlat</button>
+    <button id="btn-leave">Çık</button>
   </div>
-
-  <!-- ODAYA KATIL FORMU -->
-  <div id="join-form" style="display:none; flex-direction:column; gap:12px; padding:20px; border-radius:12px; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:20; color:white; min-width:280px;">
-    <h3>Odaya Katıl</h3>
-    <input id="join-room-name" placeholder="Oda ismi ara..." autocomplete="off" />
-    <div id="search-results" style="max-height:150px; overflow-y:auto;"></div>
-    <input id="join-password" placeholder="Şifre (gerekliyse)" type="password" style="display:none;" />
-    <button onclick="window.joinRoom()">Katıl</button>
-    <button onclick="hideJoinForm()">İptal</button>
+  <div id="hider-buttons" style="display:none">
+    <button id="btn-pipette">🎨 Boya</button>
+    <button id="btn-freeze">🧊 Don</button>
   </div>
-
-  <!-- OYUN İÇİ UI -->
-  <div id="game-ui" style="display:none;">
-    <div id="top-bar">
-      <div id="status-text"></div>
-      <div id="timer"></div>
-      <div id="scores"></div>
-      <button id="btn-start" style="display:none;">Başlat</button>
-      <button id="btn-leave">Çık</button>
-    </div>
-    <div id="hider-buttons" style="display:none;">
-      <button id="btn-pipette">🎨 Boya</button>
-      <button id="btn-freeze">🧊 Don</button>
-    </div>
-    <div id="seeker-buttons" style="display:none;">
-      <button id="btn-catch">🔍 Yakala</button>
-    </div>
-    <div id="joystick-container">
-      <div id="joystick-base"><div id="joystick-thumb"></div></div>
-    </div>
+  <div id="seeker-buttons" style="display:none">
+    <button id="btn-catch">🔍 Yakala</button>
   </div>
+  <div id="joystick-container">
+    <div id="joystick-base"><div id="joystick-thumb"></div></div>
+  </div>
+</div>
 
-  <script>
-    function showCreateForm() {
-      document.getElementById('menu').style.display = 'none';
-      document.getElementById('create-form').style.display = 'flex';
-    }
-    function hideCreateForm() {
-      document.getElementById('create-form').style.display = 'none';
-      document.getElementById('menu').style.display = 'flex';
-    }
-    function showJoinForm() {
-      document.getElementById('menu').style.display = 'none';
-      document.getElementById('join-form').style.display = 'flex';
-      if (typeof updateJoinSearchResults === 'function') {
-        updateJoinSearchResults('');
-      }
-    }
-    function hideJoinForm() {
-      document.getElementById('join-form').style.display = 'none';
-      document.getElementById('menu').style.display = 'flex';
-    }
-  </script>
+<script>
+  // Global menü fonksiyonları
+  function showCreateForm() {
+    document.getElementById('menu').style.display = 'none';
+    document.getElementById('create-form').style.display = 'flex';
+  }
+  function hideCreateForm() {
+    document.getElementById('create-form').style.display = 'none';
+    document.getElementById('menu').style.display = 'flex';
+  }
+  function showJoinForm() {
+    document.getElementById('menu').style.display = 'none';
+    document.getElementById('join-form').style.display = 'flex';
+    if (typeof updateJoinSearchResults === 'function') updateJoinSearchResults('');
+  }
+  function hideJoinForm() {
+    document.getElementById('join-form').style.display = 'none';
+    document.getElementById('menu').style.display = 'flex';
+  }
+  // Bu fonksiyonlar client.js içinde tanımlanacak ve window.ws kullanacak
+</script>
 
-  <script type="importmap">
-    { "imports": { "three": "https://unpkg.com/three@0.157.0/build/three.module.js" } }
-  </script>
-  <script src="client.js" type="module"></script>
+<script type="importmap">
+  { "imports": { "three": "https://unpkg.com/three@0.157.0/build/three.module.js" } }
+</script>
+<script src="client.js" type="module"></script>
 </body>
 </html>
