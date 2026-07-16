@@ -9,16 +9,9 @@ let currentRoom = null;
 let gameState = null;
 
 // UI elemanları
-const menuDiv = document.getElementById('menu');
-const createForm = document.getElementById('create-form');
-const joinForm = document.getElementById('join-form');
-const gameUI = document.getElementById('game-ui');
-const statusText = document.getElementById('status-text');
-const timerDiv = document.getElementById('timer');
-const scoresDiv = document.getElementById('scores');
-const btnStart = document.getElementById('btn-start');
-const hiderButtons = document.getElementById('hider-buttons');
-const seekerButtons = document.getElementById('seeker-buttons');
+let menuDiv, createForm, joinForm, gameUI;
+let statusText, timerDiv, scoresDiv, btnStart;
+let hiderButtons, seekerButtons;
 
 // Three.js
 let scene, camera, renderer;
@@ -47,7 +40,85 @@ let cameraTouchStartX = 0;
 
 // --- Harita & Çarpışma ---
 const WORLD_LIMIT = 20;
-let collisionBoxes = []; // { min: Vector3, max: Vector3 }
+let collisionBoxes = [];
+
+// Sayfa tamamen yüklendikten sonra tüm referansları al ve event'leri bağla
+window.addEventListener('DOMContentLoaded', () => {
+  menuDiv = document.getElementById('menu');
+  createForm = document.getElementById('create-form');
+  joinForm = document.getElementById('join-form');
+  gameUI = document.getElementById('game-ui');
+  statusText = document.getElementById('status-text');
+  timerDiv = document.getElementById('timer');
+  scoresDiv = document.getElementById('scores');
+  btnStart = document.getElementById('btn-start');
+  hiderButtons = document.getElementById('hider-buttons');
+  seekerButtons = document.getElementById('seeker-buttons');
+
+  // Buton olayları
+  document.getElementById('btn-create-room').onclick = () => {
+    menuDiv.style.display = 'none';
+    createForm.style.display = 'flex';
+  };
+  document.getElementById('btn-create-cancel').onclick = () => {
+    createForm.style.display = 'none';
+    menuDiv.style.display = 'flex';
+  };
+  document.getElementById('btn-join-room').onclick = () => {
+    menuDiv.style.display = 'none';
+    joinForm.style.display = 'flex';
+    updateJoinSearchResults('');
+  };
+  document.getElementById('btn-join-cancel').onclick = () => {
+    joinForm.style.display = 'none';
+    menuDiv.style.display = 'flex';
+  };
+
+  document.querySelectorAll('input[name="visibility"]').forEach(r => {
+    r.onchange = () => {
+      document.getElementById('password-field').style.display =
+        r.value === 'private' ? 'block' : 'none';
+    };
+  });
+
+  document.getElementById('btn-create-confirm').onclick = () => {
+    const name = document.getElementById('room-name').value.trim();
+    if (!name) return alert('Oda ismi girin.');
+    const map = document.getElementById('map-select').value;
+    const hiderTime = parseInt(document.getElementById('hider-time').value);
+    const seekerTime = parseInt(document.getElementById('seeker-time').value);
+    const maxPlayers = parseInt(document.getElementById('max-players').value);
+    const isPublic = document.querySelector('input[name="visibility"]:checked').value === 'public';
+    const password = isPublic ? '' : document.getElementById('room-password').value;
+    ws.send(JSON.stringify({
+      type: 'createRoom',
+      settings: { name, map, hiderPrepTime: hiderTime, seekerTime, maxPlayers, public: isPublic, password }
+    }));
+  };
+
+  document.getElementById('btn-join-confirm').onclick = () => {
+    const roomName = document.getElementById('join-room-name').value.trim();
+    if (!roomName) return;
+    const password = document.getElementById('join-password').value;
+    ws.send(JSON.stringify({ type: 'joinRoom', roomName, password }));
+  };
+
+  document.getElementById('btn-leave').onclick = () => {
+    ws.send(JSON.stringify({ type: 'leaveRoom' }));
+    exitToMenu();
+  };
+
+  btnStart.onclick = () => ws.send(JSON.stringify({ type: 'startGame' }));
+
+  // Oda arama
+  const joinNameInput = document.getElementById('join-room-name');
+  joinNameInput.addEventListener('input', () => {
+    updateJoinSearchResults(joinNameInput.value.trim().toLowerCase());
+  });
+
+  // WebSocket bağlantısını şimdi başlat (DOM hazır)
+  connect();
+});
 
 // ---------- Bağlantı ----------
 function connect() {
@@ -56,69 +127,8 @@ function connect() {
   ws.onmessage = handleServerMessage;
   ws.onclose = () => setTimeout(connect, 2000);
 }
-connect();
 
-// ---------- Menü / Form Olayları ----------
-document.getElementById('btn-create-room').onclick = () => {
-  menuDiv.style.display = 'none';
-  createForm.style.display = 'flex';
-};
-document.getElementById('btn-create-cancel').onclick = () => {
-  createForm.style.display = 'none';
-  menuDiv.style.display = 'flex';
-};
-document.getElementById('btn-join-room').onclick = () => {
-  menuDiv.style.display = 'none';
-  joinForm.style.display = 'flex';
-  updateJoinSearchResults('');
-};
-document.getElementById('btn-join-cancel').onclick = () => {
-  joinForm.style.display = 'none';
-  menuDiv.style.display = 'flex';
-};
-
-document.querySelectorAll('input[name="visibility"]').forEach(r => {
-  r.onchange = () => {
-    document.getElementById('password-field').style.display =
-      r.value === 'private' ? 'block' : 'none';
-  };
-});
-
-document.getElementById('btn-create-confirm').onclick = () => {
-  const name = document.getElementById('room-name').value.trim();
-  if (!name) return alert('Oda ismi girin.');
-  const map = document.getElementById('map-select').value;
-  const hiderTime = parseInt(document.getElementById('hider-time').value);
-  const seekerTime = parseInt(document.getElementById('seeker-time').value);
-  const maxPlayers = parseInt(document.getElementById('max-players').value);
-  const isPublic = document.querySelector('input[name="visibility"]:checked').value === 'public';
-  const password = isPublic ? '' : document.getElementById('room-password').value;
-  ws.send(JSON.stringify({
-    type: 'createRoom',
-    settings: { name, map, hiderPrepTime: hiderTime, seekerTime, maxPlayers, public: isPublic, password }
-  }));
-};
-
-document.getElementById('btn-join-confirm').onclick = () => {
-  const roomName = document.getElementById('join-room-name').value.trim();
-  if (!roomName) return;
-  const password = document.getElementById('join-password').value;
-  ws.send(JSON.stringify({ type: 'joinRoom', roomName, password }));
-};
-
-document.getElementById('btn-leave').onclick = () => {
-  ws.send(JSON.stringify({ type: 'leaveRoom' }));
-  exitToMenu();
-};
-
-btnStart.onclick = () => ws.send(JSON.stringify({ type: 'startGame' }));
-
-// Oda arama
-const joinNameInput = document.getElementById('join-room-name');
-joinNameInput.addEventListener('input', () => {
-  updateJoinSearchResults(joinNameInput.value.trim().toLowerCase());
-});
-
+// Oda arama yardımcıları
 function updateJoinSearchResults(query) {
   const resultsDiv = document.getElementById('search-results');
   const filtered = currentRoomList.filter(r => r.name.toLowerCase().includes(query));
@@ -176,31 +186,33 @@ function updateGameState(state) {
   gameUI.style.display = 'block';
 
   const me = state.players.find(p => p.id === myPlayerId);
-  statusText.innerText =
+  if (statusText) statusText.innerText =
     state.state === 'lobby' ? 'Lobide bekleniyor...' :
     state.state === 'preparing' ? 'Hazırlanma aşaması' :
     state.state === 'seeking' ? 'Arama aşaması' : '';
-  timerDiv.innerText = state.timeLeft ? `Süre: ${state.timeLeft}s` : '';
-  scoresDiv.innerText = Object.entries(state.scores)
+  if (timerDiv) timerDiv.innerText = state.timeLeft ? `Süre: ${state.timeLeft}s` : '';
+  if (scoresDiv) scoresDiv.innerText = Object.entries(state.scores)
     .map(([id, sc]) => `Oyuncu ${id.slice(0,4)}: ${sc}`).join(' | ');
 
   if (me) {
     myColor = me.color;
     frozen = me.frozen;
 
-    btnStart.style.display = (me.role === 'seeker' && state.state === 'lobby') ? 'inline-block' : 'none';
+    if (btnStart) btnStart.style.display = (me.role === 'seeker' && state.state === 'lobby') ? 'inline-block' : 'none';
 
     if (me.role === 'hider' && state.state === 'preparing') {
-      hiderButtons.style.display = 'flex';
-      seekerButtons.style.display = 'none';
-      document.getElementById('btn-pipette').disabled = frozen;
-      document.getElementById('btn-freeze').disabled = frozen;
+      if (hiderButtons) hiderButtons.style.display = 'flex';
+      if (seekerButtons) seekerButtons.style.display = 'none';
+      const pipetteBtn = document.getElementById('btn-pipette');
+      const freezeBtn = document.getElementById('btn-freeze');
+      if (pipetteBtn) pipetteBtn.disabled = frozen;
+      if (freezeBtn) freezeBtn.disabled = frozen;
     } else if (me.role === 'seeker' && state.state === 'seeking') {
-      hiderButtons.style.display = 'none';
-      seekerButtons.style.display = 'flex';
+      if (hiderButtons) hiderButtons.style.display = 'none';
+      if (seekerButtons) seekerButtons.style.display = 'flex';
     } else {
-      hiderButtons.style.display = 'none';
-      seekerButtons.style.display = 'none';
+      if (hiderButtons) hiderButtons.style.display = 'none';
+      if (seekerButtons) seekerButtons.style.display = 'none';
     }
   }
 
@@ -311,18 +323,13 @@ function initScene(mapType) {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // Çarpışma ve map listelerini temizle
   collisionBoxes = [];
   mapObjects = [];
 
   if (mapType === 'minecraft') {
-    const wood = 0x8B6B4D;
-    const leaves = 0x2D5A27;
-    const stone = 0x808080;
-    const brick = 0xB53C1A;
-    const water = 0x3399FF;
+    const wood = 0x8B6B4D, leaves = 0x2D5A27, stone = 0x808080;
+    const brick = 0xB53C1A, water = 0x3399FF;
 
-    // Zemin (taş döşeme)
     for (let ix = -4; ix <= 4; ix++) {
       for (let iz = -4; iz <= 4; iz++) {
         addBlocks([{ color: stone, x: ix * 1.5, y: 0, z: iz * 1.5, w: 1, h: 0.3, d: 1 }]);
@@ -330,53 +337,38 @@ function initScene(mapType) {
     }
 
     const addWall = (start, end, axis, fixed, color = wood) => {
-      if (axis === 'x') {
-        for (let x = start; x <= end; x++) {
-          addBlocks([{ color, x: x * 1.5, y: 0.5, z: fixed, w: 1, h: 3, d: 1 }]);
-        }
-      } else if (axis === 'z') {
-        for (let z = start; z <= end; z++) {
-          addBlocks([{ color, x: fixed, y: 0.5, z: z * 1.5, w: 1, h: 3, d: 1 }]);
-        }
+      for (let i = start; i <= end; i++) {
+        if (axis === 'x') addBlocks([{ color, x: i * 1.5, y: 0.5, z: fixed, w: 1, h: 3, d: 1 }]);
+        else addBlocks([{ color, x: fixed, y: 0.5, z: i * 1.5, w: 1, h: 3, d: 1 }]);
       }
     };
-
-    // Duvarlar
-    addWall(-4, 4, 'x', -4.5, wood); // kuzey
+    addWall(-4, 4, 'x', -4.5, wood);
     for (let x = -4; x <= 4; x++) {
-      if (x >= -1 && x <= 0) continue; // kapı boşluğu
+      if (x >= -1 && x <= 0) continue;
       addBlocks([{ color: wood, x: x * 1.5, y: 0.5, z: 4.5, w: 1, h: 3, d: 1 }]);
     }
-    addWall(-4, 4, 'z', -4.5, wood); // batı
-    addWall(-4, 4, 'z', 4.5, wood);  // doğu
+    addWall(-4, 4, 'z', -4.5, wood);
+    addWall(-4, 4, 'z', 4.5, wood);
 
-    // Çatı
-    for (let ix = -4; ix <= 4; ix++) {
-      for (let iz = -4; iz <= 4; iz++) {
+    for (let ix = -4; ix <= 4; ix++)
+      for (let iz = -4; iz <= 4; iz++)
         addBlocks([{ color: brick, x: ix * 1.5, y: 3.5, z: iz * 1.5, w: 1, h: 0.5, d: 1 }]);
-      }
-    }
 
-    // İç masa
     addBlocks([{ color: 0xFFFFFF, x: 0, y: 0.3, z: 0, w: 2, h: 0.5, d: 2 }]);
     addBlocks([{ color: 0xFFFFFF, x: 0, y: 0.8, z: 1, w: 0.5, h: 1, d: 0.5 }]);
 
-    // Ağaçlar
     const tree = (tx, tz) => {
       addBlocks([{ color: wood, x: tx, y: 0, z: tz, w: 0.8, h: 4, d: 0.8 }]);
       addBlocks([{ color: leaves, x: tx, y: 4, z: tz, w: 2.5, h: 2, d: 2.5 }]);
-      for (const [dx, dz] of [[1.2,0],[-1.2,0],[0,1.2],[0,-1.2]]) {
-        addBlocks([{ color: leaves, x: tx+dx, y: 3.5, z: tz+dz, w: 1.5, h: 1.5, d: 1.5 }]);
-      }
+      [[1.2,0],[-1.2,0],[0,1.2],[0,-1.2]].forEach(([dx,dz]) =>
+        addBlocks([{ color: leaves, x: tx+dx, y: 3.5, z: tz+dz, w: 1.5, h: 1.5, d: 1.5 }])
+      );
     };
     tree(-6, -6); tree(6, -6); tree(-6, 6); tree(6, 6);
 
-    // Gölet
-    for (let ix = 6; ix <= 7; ix++) {
-      for (let iz = 6; iz <= 7; iz++) {
+    for (let ix = 6; ix <= 7; ix++)
+      for (let iz = 6; iz <= 7; iz++)
         addBlocks([{ color: water, x: ix * 1.5, y: 0, z: iz * 1.5, w: 1, h: 0.4, d: 1 }]);
-      }
-    }
   } else if (mapType === 'ev') {
     const evBlocks = [
       { color: 0x8B0000, x: 1.5, y: 0, z: 2, w: 0.8, h: 1.2, d: 0.8 },
@@ -444,9 +436,7 @@ let joystickVec = { x:0, z:0 };
 
 jBase.addEventListener('touchstart', e => {
   e.preventDefault();
-  if (joystickTouchId === null) {
-    joystickTouchId = e.changedTouches[0].identifier;
-  }
+  if (joystickTouchId === null) joystickTouchId = e.changedTouches[0].identifier;
 });
 jBase.addEventListener('touchmove', e => {
   e.preventDefault();
@@ -476,9 +466,9 @@ jBase.addEventListener('touchend', e => {
   }
 });
 
-// Kamera sürükleme (butonlara karışmaz)
+// Kamera sürükleme (çakışmayacak şekilde)
 const cameraDragZone = document.createElement('div');
-cameraDragZone.style.cssText = 'position:absolute; top:0; right:0; width:40%; height:70%; z-index:5; touch-action:none; pointer-events: auto;';
+cameraDragZone.style.cssText = 'position:absolute; top:0; right:0; width:40%; height:70%; z-index:5; touch-action:none;';
 document.body.appendChild(cameraDragZone);
 
 cameraDragZone.addEventListener('touchstart', e => {
@@ -509,7 +499,6 @@ cameraDragZone.addEventListener('touchend', e => {
   }
 });
 
-// Klavye kamera
 window.addEventListener('keydown', e => {
   if (e.key === 'q' || e.key === 'Q') cameraAngle += 0.05;
   if (e.key === 'e' || e.key === 'E') cameraAngle -= 0.05;
@@ -560,8 +549,8 @@ function fixedUpdate() {
   if (renderer && scene && camera) renderer.render(scene, camera);
 }
 
-// ---------- Butonlar ----------
-document.getElementById('btn-pipette').onclick = () => {
+// Oyun içi butonlar (güvenli atama)
+document.getElementById('btn-pipette')?.addEventListener('click', () => {
   if (!myFigure || frozen) return;
   const pos = myFigure.position;
   let closestDist = 2.5, picked = null;
@@ -574,14 +563,14 @@ document.getElementById('btn-pipette').onclick = () => {
     myFigure.material.color.set(picked);
     ws.send(JSON.stringify({ type: 'color', color: picked }));
   }
-};
-document.getElementById('btn-freeze').onclick = () => {
+});
+document.getElementById('btn-freeze')?.addEventListener('click', () => {
   if (frozen) return;
   ws.send(JSON.stringify({ type: 'freeze' }));
-};
-document.getElementById('btn-catch').onclick = () => {
+});
+document.getElementById('btn-catch')?.addEventListener('click', () => {
   ws.send(JSON.stringify({ type: 'catch' }));
-};
+});
 
 window.addEventListener('resize', () => {
   if (camera) {
