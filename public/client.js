@@ -12,12 +12,15 @@ let CAMERA_HEIGHT = 3;
 const CAMERA_MIN = 3, CAMERA_MAX = 20;
 let joystickTouchId = null, cameraTouchId = null, cameraTouchStartX = 0;
 let pinchStartDist = 0;
-const WORLD_LIMIT = 36; // 2 kat büyüdü
+const WORLD_LIMIT = 36;
 const FIXED_FRAME_MS = 1000 / 30;
 let collisionBoxes = [];
 let bullets = [];
 let raycaster = new THREE.Raycaster();
-let villagers = []; // köylüler
+
+// Boya modu
+let paintMode = false; // false = pipetle kopyala, true = boya
+let selectedColor = 0xff0000;
 
 // ======================== BUTONLAR ========================
 window.createRoom = () => {
@@ -71,9 +74,13 @@ window.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('btn-leave').onclick = () => { window.ws.send(JSON.stringify({ type: 'leaveRoom' })); exitToMenu(); };
   btnStart.onclick = () => window.ws.send(JSON.stringify({ type: 'startGame' }));
-  document.getElementById('btn-pipette').onclick = pipette;
+  document.getElementById('btn-pipette').onclick = pipetteMode;
   document.getElementById('btn-freeze').onclick = () => window.ws.send(JSON.stringify({ type: 'freeze' }));
   document.getElementById('btn-shoot').onclick = shoot;
+  
+  // Renk paleti butonları
+  createColorPalette();
+  
   initJoystick();
   connect();
 });
@@ -114,6 +121,52 @@ function updateRoomList(list) {
        ${r.name} (${r.players}/${r.max}) - ${r.map} ${r.hasPassword?'🔒':''}
      </div>`
   ).join('');
+}
+
+// ======================== RENK PALETİ ========================
+function createColorPalette() {
+  const palette = document.createElement('div');
+  palette.id = 'color-palette';
+  palette.style.cssText = 'display:none; position:absolute; bottom:200px; right:100px; z-index:200; background:rgba(0,0,0,0.8); padding:10px; border-radius:10px; flex-wrap:wrap; gap:6px; max-width:200px;';
+  
+  const colors = [0xff0000, 0xff4444, 0xff8800, 0xffaa00, 0xffff00, 0x88ff00, 0x00ff00, 0x00ff88, 0x00ffff, 0x0088ff, 0x0000ff, 0x8800ff, 0xff00ff, 0xff0088, 0xffffff, 0xcccccc, 0x888888, 0x444444, 0x000000, 0x8B4513, 0x228B22, 0x4B0082, 0xFFD700, 0x00CED1];
+  
+  colors.forEach(c => {
+    const btn = document.createElement('button');
+    btn.style.cssText = `width:30px; height:30px; background:#${c.toString(16).padStart(6,'0')}; border:2px solid white; border-radius:5px; cursor:pointer;`;
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      selectedColor = c;
+      paintMode = true;
+      document.getElementById('palette-title').innerText = '🎨 Boyama modu';
+      document.getElementById('color-palette').style.display = 'none';
+    };
+    palette.appendChild(btn);
+  });
+  
+  // Başlık
+  const title = document.createElement('div');
+  title.id = 'palette-title';
+  title.style.cssText = 'color:white; text-align:center; width:100%; margin-bottom:4px;';
+  title.innerText = '🎨 Renk seç';
+  palette.insertBefore(title, palette.firstChild);
+  
+  document.body.appendChild(palette);
+}
+
+function pipetteMode() {
+  const palette = document.getElementById('color-palette');
+  if (paintMode) {
+    // Boyama modundan çık, pipetle moduna geç
+    paintMode = false;
+    document.getElementById('palette-title').innerText = '🖌️ Pipetle kopyala';
+    palette.style.display = 'none';
+  } else {
+    // Pipetle modundan renk paletine geç
+    palette.style.display = palette.style.display === 'flex' ? 'none' : 'flex';
+    palette.style.flexWrap = 'wrap';
+    document.getElementById('palette-title').innerText = '🎨 Renk seç';
+  }
 }
 
 // ======================== OYUN DURUMU ========================
@@ -176,7 +229,7 @@ function exitToMenu() {
   scene = null;
 }
 
-// ======================== MINECRAFT KARAKTER MODELİ ========================
+// ======================== MINECRAFT KARAKTER ========================
 function createMinecraftCharacter(scale = 1.0, color = 0xffffff) {
   const group = new THREE.Group();
   const skinMat = new THREE.MeshStandardMaterial({ color, roughness: 0.8 });
@@ -205,18 +258,6 @@ function createMinecraftCharacter(scale = 1.0, color = 0xffffff) {
   return group;
 }
 
-// Köylü modeli (oyuncuyla aynı ama farklı kıyafet rengi)
-function createVillager(x, z) {
-  const colors = [0xC4A46C, 0x8B4513, 0xA0522D, 0xDEB887];
-  const color = colors[Math.floor(Math.random() * colors.length)];
-  const villager = createMinecraftCharacter(1.0, color);
-  villager.position.set(x, 0, z);
-  villager.userData = { isVillager: true, color };
-  scene.add(villager);
-  villagers.push(villager);
-  return villager;
-}
-
 // ======================== SAHNE KURULUMU ========================
 function initScene(mapType) {
   if (scene) exitToMenu();
@@ -242,7 +283,6 @@ function initScene(mapType) {
   sun.shadow.camera.bottom = -50;
   scene.add(sun);
 
-  // Büyük zemin
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(80, 80),
     new THREE.MeshStandardMaterial({ color: 0x7C9D4D, roughness: 0.9 })
@@ -254,15 +294,11 @@ function initScene(mapType) {
   collisionBoxes = [];
   mapObjects = [];
   bullets = [];
-  villagers = [];
 
   buildMinecraftWorld();
 
-  // SPAWN ALANI (orta boş)
-  // Orta nokta (0,0) etrafı tamamen boş
-
   myFigure = createMinecraftCharacter(1.0, 0xffffff);
-  myFigure.position.set(0, 0, 0); // orta boş alanda başla
+  myFigure.position.set(0, 0, 0);
   scene.add(myFigure);
   remoteFigures = {};
 
@@ -270,31 +306,10 @@ function initScene(mapType) {
 }
 
 function buildMinecraftWorld() {
-  const wood = 0x8B6914;
-  const plank = 0xBC8F5F;
-  const stone = 0x808080;
-  const glass = 0xAADDFF;
-  const leaves = 0x2D5A27;
-  const log = 0x6B4226;
-  const roof = 0xB53C1A;
-  const path = 0xC4A46C;
-  const water = 0x3399FF;
-  const obsidian = 0x1A1A2E;
-  const portal = 0x800080;
-  const gold = 0xFFD700;
-  const diamond = 0x00FFFF;
-  const cobblestone = 0x6B6B6B;
-  const mossyCobble = 0x5A6B4A;
-  const torch = 0xFFA500;
-
-  const add = (color, x, y, z, w = 1, h = 1, d = 1, transparent = false, opacity = 1) => {
+  const add = (color, x, y, z, w = 1, h = 1, d = 1) => {
     w *= 1.5; h *= 1.5; d *= 1.5;
     const geo = new THREE.BoxGeometry(w, h, d);
-    const mat = new THREE.MeshStandardMaterial({
-      color, roughness: color === glass ? 0.3 : 0.9,
-      metalness: color === gold || color === diamond ? 0.7 : 0.1,
-      transparent, opacity
-    });
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.9 });
     const b = new THREE.Mesh(geo, mat);
     b.position.set(x, y + h / 2, z);
     b.castShadow = true;
@@ -309,93 +324,48 @@ function buildMinecraftWorld() {
     return b;
   };
 
-  // === EV (kuzeyde, ortadan uzakta) ===
-  const houseX = 12, houseZ = -12;
-  for (let ix = -4; ix <= 4; ix++) {
-    for (let iz = -4; iz <= 4; iz++) {
-      add(stone, houseX + ix * 1.5, 0, houseZ + iz * 1.5, 1, 0.3, 1);
-    }
-  }
+  // Ev (kuzeydoğu)
+  const hx = 12, hz = -12;
+  for (let ix = -4; ix <= 4; ix++)
+    for (let iz = -4; iz <= 4; iz++)
+      add(0x808080, hx + ix*1.5, 0, hz + iz*1.5, 1, 0.3, 1);
   for (let i = -4; i <= 4; i++) {
-    add(wood, houseX + i * 1.5, 0.5, houseZ - 4.5, 1, 3, 1);
-    if (i < -1 || i > 0) add(wood, houseX + i * 1.5, 0.5, houseZ + 4.5, 1, 3, 1);
-    add(wood, houseX - 4.5, 0.5, houseZ + i * 1.5, 1, 3, 1);
-    add(wood, houseX + 4.5, 0.5, houseZ + i * 1.5, 1, 3, 1);
+    add(0x8B6914, hx + i*1.5, 0.5, hz - 4.5, 1, 3, 1);
+    if (i < -1 || i > 0) add(0x8B6914, hx + i*1.5, 0.5, hz + 4.5, 1, 3, 1);
+    add(0x8B6914, hx - 4.5, 0.5, hz + i*1.5, 1, 3, 1);
+    add(0x8B6914, hx + 4.5, 0.5, hz + i*1.5, 1, 3, 1);
   }
-  add(glass, houseX - 3, 1.5, houseZ - 4.5, 1, 1.2, 0.2, true, 0.4);
-  add(glass, houseX + 3, 1.5, houseZ - 4.5, 1, 1.2, 0.2, true, 0.4);
-  for (let ix = -5; ix <= 5; ix++) {
-    for (let iz = -5; iz <= 5; iz++) {
-      add(roof, houseX + ix * 1.5, 3.5, houseZ + iz * 1.5, 1, 0.5, 1);
-    }
-  }
+  for (let ix = -5; ix <= 5; ix++)
+    for (let iz = -5; iz <= 5; iz++)
+      add(0xB53C1A, hx + ix*1.5, 3.5, hz + iz*1.5, 1, 0.5, 1);
 
-  // === KIRIK NETHER PORTALI (doğuda) ===
-  const portalX = -15, portalZ = 0;
-  // Obsidyen çerçeve
-  add(obsidian, portalX, 0, portalZ, 0.8, 4, 0.8);
-  add(obsidian, portalX, 0, portalZ + 2.5, 0.8, 4, 0.8);
-  add(obsidian, portalX, 3.5, portalZ + 1.25, 0.8, 0.8, 2.5);
-  // Portal kısmı (mor)
-  for (let iy = 0; iy < 4; iy++) {
-    for (let iz = 0; iz < 1; iz++) {
-      add(portal, portalX, 0.5 + iy * 1.5, portalZ + 0.75 + iz * 1.5, 0.2, 1, 1, true, 0.6);
-    }
-  }
-  // Kırık parçalar etrafta
-  add(obsidian, portalX + 1, 0, portalZ - 0.8, 0.5, 0.5, 0.5);
-  add(obsidian, portalX - 0.8, 0, portalZ + 3, 0.5, 0.5, 0.5);
-  add(portal, portalX + 1.2, 0, portalZ + 1.5, 0.3, 0.5, 0.3, true, 0.5);
+  // Nether portal (batı)
+  const px = -15, pz = 0;
+  add(0x1A1A2E, px, 0, pz, 0.8, 4, 0.8);
+  add(0x1A1A2E, px, 0, pz + 2.5, 0.8, 4, 0.8);
+  add(0x1A1A2E, px, 3.5, pz + 1.25, 0.8, 0.8, 2.5);
+  for (let iy = 0; iy < 4; iy++)
+    for (let iz = 0; iz < 1; iz++)
+      add(0x800080, px, 0.5 + iy*1.5, pz + 0.75 + iz*1.5, 0.2, 1, 1);
 
-  // === MADEN (güneybatıda, yer altı) ===
-  const mineX = -10, mineZ = 10;
-  // Giriş (çukur)
-  add(cobblestone, mineX, 0, mineZ, 2, 0.3, 2);
-  add(cobblestone, mineX - 1.5, 0, mineZ, 0.5, 1.5, 0.5);
-  add(cobblestone, mineX + 1.5, 0, mineZ, 0.5, 1.5, 0.5);
-  add(cobblestone, mineX, 0, mineZ - 1.5, 0.5, 1.5, 0.5);
-  add(cobblestone, mineX, 0, mineZ + 1.5, 0.5, 1.5, 0.5);
-  // Maden içi değerli taşlar
-  add(gold, mineX - 0.5, 0.3, mineZ, 0.3, 0.3, 0.3);
-  add(diamond, mineX + 0.5, 0.3, mineZ + 0.5, 0.3, 0.3, 0.3);
-  add(gold, mineX, 0.3, mineZ - 0.5, 0.3, 0.3, 0.3);
-  // Meşaleler (turuncu küçük bloklar)
-  add(torch, mineX - 1.2, 1.2, mineZ, 0.15, 0.6, 0.15);
-  add(torch, mineX + 1.2, 1.2, mineZ, 0.15, 0.6, 0.15);
+  // Maden (güneybatı)
+  const mx = -10, mz = 10;
+  add(0x6B6B6B, mx, 0, mz, 2, 0.3, 2);
+  add(0xFFD700, mx - 0.5, 0.3, mz, 0.3, 0.3, 0.3);
+  add(0x00FFFF, mx + 0.5, 0.3, mz + 0.5, 0.3, 0.3, 0.3);
 
-  // === AĞAÇLAR ===
+  // Ağaçlar
   const tree = (tx, tz) => {
-    add(log, tx, 0, tz, 0.6, 3, 0.6);
-    add(leaves, tx, 3, tz, 2.5, 2, 2.5);
-    add(leaves, tx + 1, 2.5, tz, 1.5, 1.5, 1.5);
-    add(leaves, tx - 1, 2.5, tz, 1.5, 1.5, 1.5);
-    add(leaves, tx, 2.5, tz + 1, 1.5, 1.5, 1.5);
-    add(leaves, tx, 2.5, tz - 1, 1.5, 1.5, 1.5);
+    add(0x6B4226, tx, 0, tz, 0.6, 3, 0.6);
+    add(0x2D5A27, tx, 3, tz, 2.5, 2, 2.5);
   };
   tree(-5, 0); tree(5, -5); tree(0, -8); tree(8, 3); tree(-3, 8);
   tree(15, -15); tree(-15, -15); tree(15, 15); tree(-15, 15);
 
-  // === KÖYLÜLER (rastgele konumlarda) ===
-  const villagerPositions = [
-    { x: 3, z: 8 }, { x: -6, z: 4 }, { x: 8, z: -8 }, { x: -8, z: -4 },
-    { x: 10, z: 2 }, { x: -12, z: -8 }, { x: 14, z: 10 }, { x: -10, z: 12 }
-  ];
-  villagerPositions.forEach(pos => {
-    createVillager(pos.x, pos.z);
-  });
-
-  // === GÖLET ===
-  for (let ix = 4; ix <= 6; ix++) {
-    for (let iz = 4; iz <= 6; iz++) {
-      add(water, ix * 1.5, 0, iz * 1.5, 1, 0.3, 1);
-    }
-  }
-
-  // === PATİKA YOLLARI (ortadan evlere doğru) ===
-  for (let i = 1; i <= 6; i++) {
-    add(path, 0, 0, -i * 1.5, 1.5, 0.1, 1.5);
-    add(path, i * 1.5, 0, 0, 1.5, 0.1, 1.5);
-  }
+  // Gölet
+  for (let ix = 4; ix <= 6; ix++)
+    for (let iz = 4; iz <= 6; iz++)
+      add(0x3399FF, ix*1.5, 0, iz*1.5, 1, 0.3, 1);
 }
 
 // ======================== ÇARPIŞMA ========================
@@ -543,16 +513,22 @@ function initJoystick() {
 function handleMovement() {
   if (!myFigure || !window.ws || window.ws.readyState !== WebSocket.OPEN) return;
   let dx = 0, dz = 0;
-  if (key.w) dz--;
-  if (key.s) dz++;
-  if (key.a) dx--;
-  if (key.d) dx++;
-  if (window.joyVec) { dx += window.joyVec.x; dz += window.joyVec.z; }
+  // DÜZELTİLDİ: W=ileri, S=geri
+  if (key.w) dz++; // ileri = pozitif z
+  if (key.s) dz--; // geri = negatif z
+  if (key.a) dx--; // sol
+  if (key.d) dx++; // sağ
+  if (window.joyVec) {
+    // Joystick: yukarı = ileri, aşağı = geri
+    dx += window.joyVec.x;
+    dz += -window.joyVec.z; // joystick yukarı negatif z veriyor, ters çevir
+  }
   if (dx === 0 && dz === 0) return;
 
   const len = Math.sqrt(dx * dx + dz * dz);
   dx /= len; dz /= len;
   
+  // Kamera yönüne göre hareket
   const forward = new THREE.Vector3(-Math.sin(cameraAngle), 0, -Math.cos(cameraAngle));
   const right = new THREE.Vector3(Math.cos(cameraAngle), 0, -Math.sin(cameraAngle));
   const move = right.multiplyScalar(dx).add(forward.multiplyScalar(dz)).normalize();
@@ -580,32 +556,40 @@ function shoot() {
   window.ws.send(JSON.stringify({ type: 'shoot', dir: { x: dir.x, z: dir.z }, origin: { x: startPos.x, z: startPos.z } }));
 }
 
-// ======================== PİPETLE ========================
-function pipette() {
+// ======================== PİPETLE / BOYA ========================
+function pipetteMode() {
   if (!myFigure || frozen) return;
-  const pos = myFigure.position;
-  let closest = 3, color = null;
-  mapObjects.forEach(o => {
-    const d = pos.distanceTo(o.position);
-    if (d < closest) { closest = d; color = o.userData.color; }
-  });
-  // Köylülerden de renk al
-  villagers.forEach(v => {
-    const d = pos.distanceTo(v.position);
-    if (d < closest) { closest = d; color = v.userData.color; }
-  });
-  if (color !== null) {
-    myColor = color;
-    myFigure.traverse(child => { if (child.material && child.material.color) child.material.color.set(color); });
-    window.ws.send(JSON.stringify({ type: 'color', color }));
+  
+  if (paintMode) {
+    // Boyama modu: seçili rengi uygula
+    myColor = selectedColor;
+    myFigure.traverse(child => { if (child.material && child.material.color) child.material.color.set(selectedColor); });
+    window.ws.send(JSON.stringify({ type: 'color', color: selectedColor }));
+    paintMode = false;
+  } else {
+    // Pipetle modu: yakındaki objenin rengini kopyala
+    const pos = myFigure.position;
+    let closest = 3, color = null;
+    mapObjects.forEach(o => {
+      const d = pos.distanceTo(o.position);
+      if (d < closest) { closest = d; color = o.userData.color; }
+    });
+    if (color !== null) {
+      selectedColor = color;
+      myColor = color;
+      myFigure.traverse(child => { if (child.material && child.material.color) child.material.color.set(color); });
+      window.ws.send(JSON.stringify({ type: 'color', color }));
+      alert('Renk kopyalandı! 🖌️');
+    }
   }
+  
+  document.getElementById('color-palette').style.display = 'none';
 }
 
 // ======================== ANA DÖNGÜ ========================
 function fixedUpdate() {
   handleMovement();
   
-  // Mermiler
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
     b.mesh.position.add(b.velocity);
@@ -613,12 +597,6 @@ function fixedUpdate() {
     if (b.life <= 0) { scene.remove(b.mesh); bullets.splice(i, 1); }
   }
 
-  // Köylüler hafifçe sallansın
-  villagers.forEach(v => {
-    v.position.y = Math.sin(Date.now() * 0.003 + v.position.x) * 0.05;
-  });
-
-  // Kamera
   if (camera && myFigure) {
     const target = myFigure.position.clone().add(new THREE.Vector3(0, 1.2, 0));
     const ox = Math.sin(cameraAngle) * CAMERA_DISTANCE;
