@@ -189,11 +189,9 @@ function updateGameState(state) {
     .join(' | ');
 
   if (me) {
-    // Renk ve donma durumu sunucudan alınır
+    // Renk ve donma durumu sunucudan alınır, pozisyonu değiştirme
     myColor = me.color;
     frozen = me.frozen;
-    // Pozisyonu güncelleme! Yerel figür zaten doğru yerde
-    // myFigure.position.set(me.x, 0.7, me.z);  <-- bu satır kaldırıldı
 
     btnStart.style.display = (me.role === 'seeker' && state.state === 'lobby') ? 'inline-block' : 'none';
 
@@ -211,7 +209,7 @@ function updateGameState(state) {
     }
   }
 
-  // Uzak oyuncular (güncellenir)
+  // Uzak oyuncuları güncelle
   const existingIds = new Set(Object.keys(remoteFigures));
   state.players.forEach(p => {
     if (p.id === myPlayerId) return;
@@ -256,7 +254,7 @@ function exitToMenu() {
   myPlayerId = null;
 }
 
-// ---------- Three.js Sahne ----------
+// ---------- Three.js Sahne (ZENGİNLEŞTİRİLMİŞ MINECRAFT HARİTASI) ----------
 function initScene(mapType) {
   if (scene) {
     clearInterval(gameInterval);
@@ -291,35 +289,70 @@ function initScene(mapType) {
   scene.add(ground);
 
   mapObjects = [];
-  const mapData = {
-    minecraft: [
-      { type: 'box', size: [1, 1, 1], pos: [0, 0.5, 0], color: 0x8B4513 },
-      { type: 'box', size: [2, 1, 2], pos: [-2, 0.5, 2], color: 0x228B22 },
-      { type: 'box', size: [0.8, 1.5, 0.8], pos: [2.5, 0.75, -1], color: 0xFFD700 },
-      { type: 'sphere', radius: 0.6, pos: [-2.5, 0.6, -2], color: 0xFF4500 },
-      { type: 'cylinder', radiusTop: 0.4, radiusBottom: 0.4, height: 1.2, pos: [0, 0.6, 2.5], color: 0x4B0082 }
-    ],
-    ev: [
+
+  // --- YENİ MINECRAFT HARİTASI: ortada 5x5 küp ızgarası + etrafta ek objeler ---
+  if (mapType === 'minecraft') {
+    // Orta alana 5x5'lik küçük küpler (renk paleti)
+    const cubeColors = [0x8B4513, 0xA0522D, 0x6B8E23, 0x556B2F, 0x8B0000, 0xFFD700, 0x4682B4, 0x4B0082];
+    for (let i = -2; i <= 2; i++) {
+      for (let j = -2; j <= 2; j++) {
+        const color = cubeColors[(i + 2) * 5 + (j + 2)] || 0x8B4513;
+        const box = new THREE.Mesh(
+          new THREE.BoxGeometry(0.6, 0.6, 0.6),
+          new THREE.MeshStandardMaterial({ color })
+        );
+        box.position.set(i * 0.7, 0.3, j * 0.7);
+        box.castShadow = true;
+        box.receiveShadow = true;
+        box.userData = { color };
+        scene.add(box);
+        mapObjects.push(box);
+      }
+    }
+    // Etrafa daha büyük bloklar
+    const extraBlocks = [
+      { size: [1, 1, 1], pos: [3, 0.5, 2], color: 0x228B22 },
+      { size: [0.8, 1.5, 0.8], pos: [2.5, 0.75, -2], color: 0xFFD700 },
+      { size: [1.2, 0.8, 1.2], pos: [-3, 0.4, -2.5], color: 0xFF4500 },
+      { size: [0.5, 0.5, 0.5], pos: [-1.5, 0.25, 3], color: 0x00CED1 },
+      { size: [1, 2, 1], pos: [0, 1, 4], color: 0xFF69B4 },
+      { size: [2, 1, 0.8], pos: [-3, 0.5, 1], color: 0x7B68EE },
+      { size: [0.8, 0.8, 0.8], pos: [4, 0.4, -1], color: 0x32CD32 },
+    ];
+    extraBlocks.forEach(b => {
+      const box = new THREE.Mesh(
+        new THREE.BoxGeometry(...b.size),
+        new THREE.MeshStandardMaterial({ color: b.color })
+      );
+      box.position.set(b.pos[0], b.pos[1], b.pos[2]);
+      box.castShadow = true;
+      box.receiveShadow = true;
+      box.userData = { color: b.color };
+      scene.add(box);
+      mapObjects.push(box);
+    });
+  } else if (mapType === 'ev') {
+    // Ev haritası aynı kalsın
+    const evBlocks = [
       { type: 'box', size: [0.5, 0.8, 0.5], pos: [0.5, 0.4, 1], color: 0x8B0000 },
       { type: 'box', size: [1, 0.3, 1.5], pos: [-1.5, 0.15, 0], color: 0x5C4033 },
       { type: 'cylinder', radiusTop: 0.3, radiusBottom: 0.3, height: 1.5, pos: [1.2, 0.75, -1], color: 0x708090 },
       { type: 'sphere', radius: 0.5, pos: [-0.8, 0.5, -1.8], color: 0xFF69B4 },
       { type: 'box', size: [1.2, 0.6, 0.6], pos: [2, 0.3, 1.5], color: 0x556B2F }
-    ]
-  }[mapType] || [];
-
-  mapData.forEach(obj => {
-    let mesh;
-    if (obj.type === 'box') mesh = new THREE.Mesh(new THREE.BoxGeometry(...obj.size), new THREE.MeshStandardMaterial({ color: obj.color }));
-    else if (obj.type === 'sphere') mesh = new THREE.Mesh(new THREE.SphereGeometry(obj.radius), new THREE.MeshStandardMaterial({ color: obj.color }));
-    else if (obj.type === 'cylinder') mesh = new THREE.Mesh(new THREE.CylinderGeometry(obj.radiusTop, obj.radiusBottom, obj.height), new THREE.MeshStandardMaterial({ color: obj.color }));
-    mesh.position.set(obj.pos[0], obj.pos[1], obj.pos[2]);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.userData = { color: obj.color };
-    scene.add(mesh);
-    mapObjects.push(mesh);
-  });
+    ];
+    evBlocks.forEach(obj => {
+      let mesh;
+      if (obj.type === 'box') mesh = new THREE.Mesh(new THREE.BoxGeometry(...obj.size), new THREE.MeshStandardMaterial({ color: obj.color }));
+      else if (obj.type === 'sphere') mesh = new THREE.Mesh(new THREE.SphereGeometry(obj.radius), new THREE.MeshStandardMaterial({ color: obj.color }));
+      else if (obj.type === 'cylinder') mesh = new THREE.Mesh(new THREE.CylinderGeometry(obj.radiusTop, obj.radiusBottom, obj.height), new THREE.MeshStandardMaterial({ color: obj.color }));
+      mesh.position.set(obj.pos[0], obj.pos[1], obj.pos[2]);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData = { color: obj.color };
+      scene.add(mesh);
+      mapObjects.push(mesh);
+    });
+  }
 
   myFigure = new THREE.Mesh(
     new THREE.CapsuleGeometry(0.4, 0.6, 2, 8),
@@ -331,17 +364,19 @@ function initScene(mapType) {
   scene.add(myFigure);
   remoteFigures = {};
 
-  // Sabit güncelleme döngüsü
   if (gameInterval) clearInterval(gameInterval);
   gameInterval = setInterval(fixedUpdate, FIXED_FRAME_MS);
 }
 
 function fixedUpdate() {
   handleMovement();
+  // Gelişmiş kamera takibi: karakterin arkasında sabit mesafe
   if (camera && myFigure) {
-    const target = myFigure.position;
-    camera.position.lerp(new THREE.Vector3(target.x, target.y + 7, target.z + 7), 0.1);
-    camera.lookAt(target);
+    const targetPos = myFigure.position.clone();
+    const cameraOffset = new THREE.Vector3(0, 6, 8); // yukarı ve geriden
+    const desiredPosition = targetPos.clone().add(cameraOffset);
+    camera.position.lerp(desiredPosition, 0.15); // daha hızlı ve yumuşak takip
+    camera.lookAt(targetPos.x, targetPos.y + 0.5, targetPos.z);
   }
   if (renderer && scene && camera) renderer.render(scene, camera);
 }
