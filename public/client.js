@@ -634,4 +634,8 @@ function fixedUpdate() {
 
 window.addEventListener('resize', () => {
   if (camera) {
-    camera.aspect =
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  }
+});
