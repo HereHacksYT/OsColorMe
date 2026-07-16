@@ -1,19 +1,15 @@
 import * as THREE from 'three';
 
-// ---------- Bağlantı ----------
-const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-const wsUrl = `${protocol}://${location.host}`;
-let ws;
+// ---------- Global değişkenler ----------
+window.ws = null;
 let myPlayerId = null;
 let currentRoom = null;
 let gameState = null;
 
-// UI elemanları
 let menuDiv, createForm, joinForm, gameUI;
 let statusText, timerDiv, scoresDiv, btnStart;
 let hiderButtons, seekerButtons;
 
-// Three.js
 let scene, camera, renderer;
 let mapObjects = [];
 let myFigure;
@@ -21,67 +17,26 @@ let remoteFigures = {};
 let myColor = 0xffffff;
 let frozen = false;
 
-// Oda listesi
 let currentRoomList = [];
 
-// Sabit güncelleme (30 FPS)
 const FIXED_FRAME_MS = 1000 / 30;
 let gameInterval = null;
 
-// --- Kamera ---
 let cameraAngle = 0;
 const CAMERA_DISTANCE = 12;
 const CAMERA_HEIGHT = 8;
 
-// Çoklu dokunmatik kimlikleri
 let joystickTouchId = null;
 let cameraTouchId = null;
 let cameraTouchStartX = 0;
 
-// --- Harita & Çarpışma ---
 const WORLD_LIMIT = 20;
 let collisionBoxes = [];
 
-// Sayfa tamamen yüklendikten sonra tüm referansları al ve event'leri bağla
-window.addEventListener('DOMContentLoaded', () => {
-  menuDiv = document.getElementById('menu');
-  createForm = document.getElementById('create-form');
-  joinForm = document.getElementById('join-form');
-  gameUI = document.getElementById('game-ui');
-  statusText = document.getElementById('status-text');
-  timerDiv = document.getElementById('timer');
-  scoresDiv = document.getElementById('scores');
-  btnStart = document.getElementById('btn-start');
-  hiderButtons = document.getElementById('hider-buttons');
-  seekerButtons = document.getElementById('seeker-buttons');
-
-  // Buton olayları
-  document.getElementById('btn-create-room').onclick = () => {
-    menuDiv.style.display = 'none';
-    createForm.style.display = 'flex';
-  };
-  document.getElementById('btn-create-cancel').onclick = () => {
-    createForm.style.display = 'none';
-    menuDiv.style.display = 'flex';
-  };
-  document.getElementById('btn-join-room').onclick = () => {
-    menuDiv.style.display = 'none';
-    joinForm.style.display = 'flex';
-    updateJoinSearchResults('');
-  };
-  document.getElementById('btn-join-cancel').onclick = () => {
-    joinForm.style.display = 'none';
-    menuDiv.style.display = 'flex';
-  };
-
-  document.querySelectorAll('input[name="visibility"]').forEach(r => {
-    r.onchange = () => {
-      document.getElementById('password-field').style.display =
-        r.value === 'private' ? 'block' : 'none';
-    };
-  });
-
-  document.getElementById('btn-create-confirm').onclick = () => {
+// ---------- Global Fonksiyonlar ----------
+window.createRoom = function() {
+  const ws = window.ws;
+  if (ws && ws.readyState === WebSocket.OPEN) {
     const name = document.getElementById('room-name').value.trim();
     if (!name) return alert('Oda ismi girin.');
     const map = document.getElementById('map-select').value;
@@ -94,42 +49,24 @@ window.addEventListener('DOMContentLoaded', () => {
       type: 'createRoom',
       settings: { name, map, hiderPrepTime: hiderTime, seekerTime, maxPlayers, public: isPublic, password }
     }));
-  };
+  } else {
+    alert('Sunucuya bağlanılamadı, lütfen bekleyin...');
+  }
+};
 
-  document.getElementById('btn-join-confirm').onclick = () => {
+window.joinRoom = function() {
+  const ws = window.ws;
+  if (ws && ws.readyState === WebSocket.OPEN) {
     const roomName = document.getElementById('join-room-name').value.trim();
     if (!roomName) return;
     const password = document.getElementById('join-password').value;
     ws.send(JSON.stringify({ type: 'joinRoom', roomName, password }));
-  };
+  } else {
+    alert('Sunucuya bağlanılamadı, lütfen bekleyin...');
+  }
+};
 
-  document.getElementById('btn-leave').onclick = () => {
-    ws.send(JSON.stringify({ type: 'leaveRoom' }));
-    exitToMenu();
-  };
-
-  btnStart.onclick = () => ws.send(JSON.stringify({ type: 'startGame' }));
-
-  // Oda arama
-  const joinNameInput = document.getElementById('join-room-name');
-  joinNameInput.addEventListener('input', () => {
-    updateJoinSearchResults(joinNameInput.value.trim().toLowerCase());
-  });
-
-  // WebSocket bağlantısını şimdi başlat (DOM hazır)
-  connect();
-});
-
-// ---------- Bağlantı ----------
-function connect() {
-  ws = new WebSocket(wsUrl);
-  ws.onopen = () => console.log('Connected');
-  ws.onmessage = handleServerMessage;
-  ws.onclose = () => setTimeout(connect, 2000);
-}
-
-// Oda arama yardımcıları
-function updateJoinSearchResults(query) {
+window.updateJoinSearchResults = function(query) {
   const resultsDiv = document.getElementById('search-results');
   const filtered = currentRoomList.filter(r => r.name.toLowerCase().includes(query));
   resultsDiv.innerHTML = filtered.map(r => `
@@ -138,12 +75,54 @@ function updateJoinSearchResults(query) {
       ${r.name} (${r.players}/${r.maxPlayers}) - ${r.map} ${r.hasPassword ? '🔒' : ''}
     </div>
   `).join('');
-}
+};
+
 window.selectRoom = (roomName, hasPassword) => {
   document.getElementById('join-room-name').value = roomName;
   document.getElementById('join-password').style.display = hasPassword ? 'block' : 'none';
   document.getElementById('search-results').innerHTML = '';
 };
+
+// ---------- Başlatma ----------
+window.addEventListener('DOMContentLoaded', () => {
+  menuDiv = document.getElementById('menu');
+  createForm = document.getElementById('create-form');
+  joinForm = document.getElementById('join-form');
+  gameUI = document.getElementById('game-ui');
+  statusText = document.getElementById('status-text');
+  timerDiv = document.getElementById('timer');
+  scoresDiv = document.getElementById('scores');
+  btnStart = document.getElementById('btn-start');
+  hiderButtons = document.getElementById('hider-buttons');
+  seekerButtons = document.getElementById('seeker-buttons');
+
+  document.querySelectorAll('input[name="visibility"]').forEach(r => {
+    r.onchange = () => {
+      document.getElementById('password-field').style.display =
+        r.value === 'private' ? 'block' : 'none';
+    };
+  });
+
+  document.getElementById('btn-leave').onclick = () => {
+    window.ws.send(JSON.stringify({ type: 'leaveRoom' }));
+    exitToMenu();
+  };
+
+  btnStart.onclick = () => window.ws.send(JSON.stringify({ type: 'startGame' }));
+
+  initInputListeners();
+  connect();
+});
+
+// ---------- Bağlantı ----------
+function connect() {
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  const wsUrl = `${protocol}://${location.host}`;
+  window.ws = new WebSocket(wsUrl);
+  window.ws.onopen = () => console.log('Bağlandı');
+  window.ws.onmessage = handleServerMessage;
+  window.ws.onclose = () => setTimeout(connect, 2000);
+}
 
 function updateRoomList(rooms) {
   currentRoomList = rooms;
@@ -152,7 +131,7 @@ function updateRoomList(rooms) {
     <div style="padding:4px; cursor:pointer;"
          onclick="document.getElementById('join-room-name').value='${r.name}';
                   document.getElementById('join-form').style.display='flex';
-                  menuDiv.style.display='none';
+                  document.getElementById('menu').style.display='none';
                   document.getElementById('join-password').style.display='${r.hasPassword ? 'block' : 'none}';">
       ${r.name} (${r.players}/${r.maxPlayers}) - ${r.map} ${r.hasPassword ? '🔒' : ''}
     </div>
@@ -260,7 +239,7 @@ function exitToMenu() {
   myPlayerId = null;
 }
 
-// ---------- Blok oluşturma (çarpışma kutulu) ----------
+// ---------- Blok oluşturma ----------
 function createBlock(color, x, y, z, w = 1, h = 1, d = 1) {
   w *= 1.5; h *= 1.5; d *= 1.5;
   const geometry = new THREE.BoxGeometry(w, h, d);
@@ -412,111 +391,116 @@ function resolveCollisions(pos) {
 }
 
 // ---------- Giriş & Joystick ----------
-const keyState = { w:false, a:false, s:false, d:false };
-window.addEventListener('keydown', e => {
-  switch(e.key.toLowerCase()){
-    case 'w': keyState.w=true; e.preventDefault(); break;
-    case 'a': keyState.a=true; e.preventDefault(); break;
-    case 's': keyState.s=true; e.preventDefault(); break;
-    case 'd': keyState.d=true; e.preventDefault(); break;
-  }
-});
-window.addEventListener('keyup', e => {
-  switch(e.key.toLowerCase()){
-    case 'w': keyState.w=false; e.preventDefault(); break;
-    case 'a': keyState.a=false; e.preventDefault(); break;
-    case 's': keyState.s=false; e.preventDefault(); break;
-    case 'd': keyState.d=false; e.preventDefault(); break;
-  }
-});
-
-const jBase = document.getElementById('joystick-base');
-const jThumb = document.getElementById('joystick-thumb');
-let joystickVec = { x:0, z:0 };
-
-jBase.addEventListener('touchstart', e => {
-  e.preventDefault();
-  if (joystickTouchId === null) joystickTouchId = e.changedTouches[0].identifier;
-});
-jBase.addEventListener('touchmove', e => {
-  e.preventDefault();
-  for (const touch of e.changedTouches) {
-    if (touch.identifier === joystickTouchId) {
-      const rect = jBase.getBoundingClientRect();
-      const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
-      let dx = touch.clientX - cx, dy = touch.clientY - cy;
-      const maxR = 40, dist = Math.sqrt(dx*dx+dy*dy);
-      if (dist > maxR) { dx *= maxR/dist; dy *= maxR/dist; }
-      jThumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-      joystickVec.x = dx / maxR;
-      joystickVec.z = dy / maxR;
-      break;
+function initInputListeners() {
+  const keyState = { w:false, a:false, s:false, d:false };
+  window.addEventListener('keydown', e => {
+    switch(e.key.toLowerCase()){
+      case 'w': keyState.w=true; e.preventDefault(); break;
+      case 'a': keyState.a=true; e.preventDefault(); break;
+      case 's': keyState.s=true; e.preventDefault(); break;
+      case 'd': keyState.d=true; e.preventDefault(); break;
     }
-  }
-});
-jBase.addEventListener('touchend', e => {
-  e.preventDefault();
-  for (const touch of e.changedTouches) {
-    if (touch.identifier === joystickTouchId) {
-      joystickTouchId = null;
-      jThumb.style.transform = 'translate(-50%, -50%)';
-      joystickVec.x = 0; joystickVec.z = 0;
-      break;
+  });
+  window.addEventListener('keyup', e => {
+    switch(e.key.toLowerCase()){
+      case 'w': keyState.w=false; e.preventDefault(); break;
+      case 'a': keyState.a=false; e.preventDefault(); break;
+      case 's': keyState.s=false; e.preventDefault(); break;
+      case 'd': keyState.d=false; e.preventDefault(); break;
     }
-  }
-});
+  });
 
-// Kamera sürükleme (çakışmayacak şekilde)
-const cameraDragZone = document.createElement('div');
-cameraDragZone.style.cssText = 'position:absolute; top:0; right:0; width:40%; height:70%; z-index:5; touch-action:none;';
-document.body.appendChild(cameraDragZone);
+  const jBase = document.getElementById('joystick-base');
+  const jThumb = document.getElementById('joystick-thumb');
+  let joystickVec = { x:0, z:0 };
 
-cameraDragZone.addEventListener('touchstart', e => {
-  e.preventDefault();
-  if (cameraTouchId === null) {
-    cameraTouchId = e.changedTouches[0].identifier;
-    cameraTouchStartX = e.changedTouches[0].clientX;
-  }
-});
-cameraDragZone.addEventListener('touchmove', e => {
-  e.preventDefault();
-  for (const touch of e.changedTouches) {
-    if (touch.identifier === cameraTouchId) {
-      const dx = touch.clientX - cameraTouchStartX;
-      cameraAngle -= dx * 0.01;
-      cameraTouchStartX = touch.clientX;
-      break;
+  jBase.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (joystickTouchId === null) joystickTouchId = e.changedTouches[0].identifier;
+  });
+  jBase.addEventListener('touchmove', e => {
+    e.preventDefault();
+    for (const touch of e.changedTouches) {
+      if (touch.identifier === joystickTouchId) {
+        const rect = jBase.getBoundingClientRect();
+        const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
+        let dx = touch.clientX - cx, dy = touch.clientY - cy;
+        const maxR = 40, dist = Math.sqrt(dx*dx+dy*dy);
+        if (dist > maxR) { dx *= maxR/dist; dy *= maxR/dist; }
+        jThumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+        joystickVec.x = dx / maxR;
+        joystickVec.z = dy / maxR;
+        break;
+      }
     }
-  }
-});
-cameraDragZone.addEventListener('touchend', e => {
-  e.preventDefault();
-  for (const touch of e.changedTouches) {
-    if (touch.identifier === cameraTouchId) {
-      cameraTouchId = null;
-      break;
+  });
+  jBase.addEventListener('touchend', e => {
+    e.preventDefault();
+    for (const touch of e.changedTouches) {
+      if (touch.identifier === joystickTouchId) {
+        joystickTouchId = null;
+        jThumb.style.transform = 'translate(-50%, -50%)';
+        joystickVec.x = 0; joystickVec.z = 0;
+        break;
+      }
     }
-  }
-});
+  });
 
-window.addEventListener('keydown', e => {
-  if (e.key === 'q' || e.key === 'Q') cameraAngle += 0.05;
-  if (e.key === 'e' || e.key === 'E') cameraAngle -= 0.05;
-});
+  const cameraDragZone = document.createElement('div');
+  cameraDragZone.style.cssText = 'position:absolute; top:0; right:0; width:40%; height:70%; z-index:5; touch-action:none;';
+  document.body.appendChild(cameraDragZone);
 
-// ---------- Hareket (kamera yönüne göre) ----------
+  cameraDragZone.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (cameraTouchId === null) {
+      cameraTouchId = e.changedTouches[0].identifier;
+      cameraTouchStartX = e.changedTouches[0].clientX;
+    }
+  });
+  cameraDragZone.addEventListener('touchmove', e => {
+    e.preventDefault();
+    for (const touch of e.changedTouches) {
+      if (touch.identifier === cameraTouchId) {
+        const dx = touch.clientX - cameraTouchStartX;
+        cameraAngle -= dx * 0.01;
+        cameraTouchStartX = touch.clientX;
+        break;
+      }
+    }
+  });
+  cameraDragZone.addEventListener('touchend', e => {
+    e.preventDefault();
+    for (const touch of e.changedTouches) {
+      if (touch.identifier === cameraTouchId) {
+        cameraTouchId = null;
+        break;
+      }
+    }
+  });
+
+  window.addEventListener('keydown', e => {
+    if (e.key === 'q' || e.key === 'Q') cameraAngle += 0.05;
+    if (e.key === 'e' || e.key === 'E') cameraAngle -= 0.05;
+  });
+
+  // Bu değişkenleri global yapıp handleMovement'da kullanacağız
+  window.keyState = keyState;
+  window.joystickVec = joystickVec;
+}
+
+// ---------- Hareket ----------
 const MOVE_SPEED = 0.15;
 
 function handleMovement() {
-  if (!myFigure || !ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!myFigure || !window.ws || window.ws.readyState !== WebSocket.OPEN) return;
 
   let inputX = 0, inputZ = 0;
-  if (keyState.w) inputZ -= 1;
-  if (keyState.s) inputZ += 1;
-  if (keyState.a) inputX -= 1;
-  if (keyState.d) inputX += 1;
-  inputX += joystickVec.x;
-  inputZ += joystickVec.z;
+  if (window.keyState.w) inputZ -= 1;
+  if (window.keyState.s) inputZ += 1;
+  if (window.keyState.a) inputX -= 1;
+  if (window.keyState.d) inputX += 1;
+  inputX += window.joystickVec.x;
+  inputZ += window.joystickVec.z;
 
   if (inputX !== 0 || inputZ !== 0) {
     const len = Math.sqrt(inputX*inputX + inputZ*inputZ);
@@ -532,7 +516,7 @@ function handleMovement() {
     newPos.z = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, newPos.z));
     resolveCollisions(newPos);
     myFigure.position.copy(newPos);
-    ws.send(JSON.stringify({ type: 'move', x: myFigure.position.x, z: myFigure.position.z }));
+    window.ws.send(JSON.stringify({ type: 'move', x: myFigure.position.x, z: myFigure.position.z }));
   }
 }
 
@@ -549,7 +533,7 @@ function fixedUpdate() {
   if (renderer && scene && camera) renderer.render(scene, camera);
 }
 
-// Oyun içi butonlar (güvenli atama)
+// Oyun içi butonlar
 document.getElementById('btn-pipette')?.addEventListener('click', () => {
   if (!myFigure || frozen) return;
   const pos = myFigure.position;
@@ -561,15 +545,15 @@ document.getElementById('btn-pipette')?.addEventListener('click', () => {
   if (picked !== null) {
     myColor = picked;
     myFigure.material.color.set(picked);
-    ws.send(JSON.stringify({ type: 'color', color: picked }));
+    window.ws.send(JSON.stringify({ type: 'color', color: picked }));
   }
 });
 document.getElementById('btn-freeze')?.addEventListener('click', () => {
   if (frozen) return;
-  ws.send(JSON.stringify({ type: 'freeze' }));
+  window.ws.send(JSON.stringify({ type: 'freeze' }));
 });
 document.getElementById('btn-catch')?.addEventListener('click', () => {
-  ws.send(JSON.stringify({ type: 'catch' }));
+  window.ws.send(JSON.stringify({ type: 'catch' }));
 });
 
 window.addEventListener('resize', () => {
