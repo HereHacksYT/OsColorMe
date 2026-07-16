@@ -7,8 +7,8 @@
 body {
   overflow: hidden;
   touch-action: none;
-  background: #111;
   font-family: 'Segoe UI', Arial, sans-serif;
+  /* Arka plan resmi doğrudan body'de değil, menu div'inde olacak */
 }
 
 canvas {
@@ -19,9 +19,9 @@ canvas {
   z-index: 0;
 }
 
-/* === Ana Menü Arka Planı (Minecraft Lobi) === */
+/* === Ana Menü (Arka plan resmi) === */
 #menu {
-  background-image: url('https://i.imgur.com/r3vYp5q.jpg'); /* Yeni görsel */
+  background-image: url('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSYt9EC2e74iGkR0ZTTXDpJNmACAJHJvLc7fuQM--LieA&s=10');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -31,6 +31,8 @@ canvas {
   height: 100vh;
   color: white;
   gap: 20px;
+  position: relative;
+  z-index: 1;
 }
 
 #menu h1 {
@@ -38,17 +40,20 @@ canvas {
   text-shadow: 3px 3px 0 #000;
 }
 
+/* Ana menü butonları */
 #menu button {
   font-size: 1.3em;
   padding: 15px 30px;
   background: rgba(0, 0, 0, 0.7);
   border: 2px solid white;
   color: white;
-  pointer-events: auto;
+  cursor: pointer;
   z-index: 100;
+  position: relative;
+  pointer-events: auto;
+  border-radius: 10px;
 }
 
-/* Oda listesi */
 #room-list {
   max-height: 200px;
   overflow-y: auto;
@@ -58,8 +63,9 @@ canvas {
   border-radius: 10px;
   padding: 8px;
   color: white;
-  pointer-events: auto;
   z-index: 100;
+  position: relative;
+  pointer-events: auto;
 }
 
 /* Formlar */
