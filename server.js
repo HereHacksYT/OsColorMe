@@ -35,11 +35,11 @@ class Room {
       ws,
       id: playerId,
       role: this.players.length === 0 ? 'seeker' : 'hider',
-      x: 0,
-      z: 0,
+      x: 0, z: 0,
       color: 0xffffff,
       frozen: false,
       score: 0,
+      lastMoveTime: 0,
     };
     this.players.push(player);
     if (player.role === 'seeker') this.seekerId = playerId;
@@ -249,7 +249,7 @@ function handleMove(ws, x, z) {
   if (!player) return;
   if (player.frozen && player.role === 'hider') return;
 
-  // Hiçbir kısıtlama yok, direkt pozisyon güncellenir
+  // hile koruması olmadan direkt pozisyon güncelle
   player.x = x;
   player.z = z;
   room.broadcastState();
