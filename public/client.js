@@ -35,6 +35,17 @@ let currentRoomList = [];
 const FIXED_FRAME_MS = 1000 / 30;
 let gameInterval = null;
 
+// --- Kamera kontrol değişkenleri ---
+let cameraAngle = 0; // yatay açı (radyan)
+const CAMERA_DISTANCE = 10; // kamera mesafesi
+const CAMERA_HEIGHT = 6;    // yükseklik
+// Mobil kamera sürükleme
+let isDraggingCamera = false;
+let lastTouchX = 0;
+
+// --- Harita sınırı (genişletildi) ---
+const WORLD_LIMIT = 18; // ±18 birim
+
 // ---------- Bağlantı ----------
 function connect() {
   ws = new WebSocket(wsUrl);
@@ -254,7 +265,25 @@ function exitToMenu() {
   myPlayerId = null;
 }
 
-// ---------- Three.js Sahne (ZENGİNLEŞTİRİLMİŞ MINECRAFT HARİTASI) ----------
+// ---------- Three.js Sahne (GERÇEK MINECRAFT TARZI BLOKLAR) ----------
+function createMinecraftBlock(color, x, y, z, sx = 1, sy = 1, sz = 1) {
+  // Kenarları belirgin, piksel görünümlü bloklar için hafif koyu kenarlıklı malzeme kullanıyoruz
+  const geometry = new THREE.BoxGeometry(sx, sy, sz);
+  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0.1 });
+  const block = new THREE.Mesh(geometry, material);
+  block.position.set(x, y, z);
+  block.castShadow = true;
+  block.receiveShadow = true;
+  block.userData = { color };
+  
+  // İsteğe bağlı: wireframe ekleyerek piksel havası verelim (hafif)
+  // const edges = new THREE.EdgesGeometry(geometry);
+  // const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000 }));
+  // block.add(line);
+  
+  return block;
+}
+
 function initScene(mapType) {
   if (scene) {
     clearInterval(gameInterval);
@@ -264,81 +293,124 @@ function initScene(mapType) {
   }
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87CEEB);
-  scene.fog = new THREE.Fog(0x87CEEB, 10, 40);
+  scene.fog = new THREE.Fog(0x87CEEB, 20, 50);
   camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 100);
-  camera.position.set(0, 10, 10);
+  camera.position.set(0, CAMERA_HEIGHT + 4, CAMERA_DISTANCE);
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   document.body.appendChild(renderer.domElement);
 
-  const ambient = new THREE.AmbientLight(0x445566);
+  const ambient = new THREE.AmbientLight(0x8B9DC3);
   scene.add(ambient);
   const dirLight = new THREE.DirectionalLight(0xffeedd, 1);
-  dirLight.position.set(10, 20, 5);
+  dirLight.position.set(15, 30, 10);
   dirLight.castShadow = true;
   dirLight.receiveShadow = true;
+  dirLight.shadow.mapSize.width = 2048;
+  dirLight.shadow.mapSize.height = 2048;
+  dirLight.shadow.camera.near = 1;
+  dirLight.shadow.camera.far = 80;
+  dirLight.shadow.camera.left = -25;
+  dirLight.shadow.camera.right = 25;
+  dirLight.shadow.camera.top = 25;
+  dirLight.shadow.camera.bottom = -25;
   scene.add(dirLight);
 
+  // Zemin (çimen yeşili)
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(20, 20),
-    new THREE.MeshStandardMaterial({ color: 0x556B2F })
+    new THREE.PlaneGeometry(40, 40),
+    new THREE.MeshStandardMaterial({ color: 0x7C9D4D })
   );
   ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.01;
   ground.receiveShadow = true;
   scene.add(ground);
 
   mapObjects = [];
 
-  // --- YENİ MINECRAFT HARİTASI: ortada 5x5 küp ızgarası + etrafta ek objeler ---
   if (mapType === 'minecraft') {
-    // Orta alana 5x5'lik küçük küpler (renk paleti)
-    const cubeColors = [0x8B4513, 0xA0522D, 0x6B8E23, 0x556B2F, 0x8B0000, 0xFFD700, 0x4682B4, 0x4B0082];
-    for (let i = -2; i <= 2; i++) {
-      for (let j = -2; j <= 2; j++) {
-        const color = cubeColors[(i + 2) * 5 + (j + 2)] || 0x8B4513;
-        const box = new THREE.Mesh(
-          new THREE.BoxGeometry(0.6, 0.6, 0.6),
-          new THREE.MeshStandardMaterial({ color })
-        );
-        box.position.set(i * 0.7, 0.3, j * 0.7);
-        box.castShadow = true;
-        box.receiveShadow = true;
-        box.userData = { color };
-        scene.add(box);
-        mapObjects.push(box);
+    // --- Minecraft tarzı blok dünyası ---
+    // Çeşitli blok renkleri (MC paleti)
+    const grass = 0x7C9D4D;
+    const dirt = 0x8B6B4D;
+    const stone = 0x808080;
+    const wood = 0x8B6B4D;
+    const leaves = 0x2D5A27;
+    const brick = 0xB53C1A;
+    const obsidian = 0x1A1A2E;
+    const gold = 0xF7D44A;
+    const ice = 0x90CAF9;
+    const sand = 0xE0D8A0;
+    
+    // Geniş zemin üzerinde rastgele blok kümeleri
+    // Orta alanda bir "bina" ya da yapı
+    for (let ix = -3; ix <= 3; ix++) {
+      for (let iz = -3; iz <= 3; iz++) {
+        const rand = Math.random();
+        let color = dirt;
+        if (rand < 0.3) color = stone;
+        else if (rand < 0.5) color = dirt;
+        else if (rand < 0.7) color = wood;
+        else if (rand < 0.85) color = brick;
+        else color = obsidian;
+        
+        const block = createMinecraftBlock(color, ix * 1.2, 0.6, iz * 1.2, 1, 1.2, 1);
+        scene.add(block);
+        mapObjects.push(block);
+        
+        // Bazen ikinci kat
+        if (Math.random() < 0.3) {
+          const topBlock = createMinecraftBlock(color, ix * 1.2, 1.8, iz * 1.2, 1, 1.2, 1);
+          scene.add(topBlock);
+          mapObjects.push(topBlock);
+        }
       }
     }
-    // Etrafa daha büyük bloklar
+    
+    // Etrafa dağılmış büyük bloklar
     const extraBlocks = [
-      { size: [1, 1, 1], pos: [3, 0.5, 2], color: 0x228B22 },
-      { size: [0.8, 1.5, 0.8], pos: [2.5, 0.75, -2], color: 0xFFD700 },
-      { size: [1.2, 0.8, 1.2], pos: [-3, 0.4, -2.5], color: 0xFF4500 },
-      { size: [0.5, 0.5, 0.5], pos: [-1.5, 0.25, 3], color: 0x00CED1 },
-      { size: [1, 2, 1], pos: [0, 1, 4], color: 0xFF69B4 },
-      { size: [2, 1, 0.8], pos: [-3, 0.5, 1], color: 0x7B68EE },
-      { size: [0.8, 0.8, 0.8], pos: [4, 0.4, -1], color: 0x32CD32 },
+      { c: grass, x: 5, y: 0.6, z: 5, sx: 2, sy: 1.5, sz: 2 },
+      { c: stone, x: -5, y: 1.0, z: 4, sx: 1.5, sy: 2, sz: 1.5 },
+      { c: wood, x: 6, y: 0.5, z: -3, sx: 1, sy: 2, sz: 1 },
+      { c: leaves, x: 6, y: 2.5, z: -3, sx: 1.2, sy: 1, sz: 1.2 },
+      { c: gold, x: -4, y: 0.7, z: -5, sx: 1, sy: 1, sz: 1 },
+      { c: ice, x: 0, y: 0.5, z: 6, sx: 2, sy: 0.8, sz: 2 },
+      { c: sand, x: -6, y: 0.5, z: -2, sx: 1.5, sy: 1, sz: 1.5 },
+      { c: obsidian, x: 3, y: 1, z: -6, sx: 1, sy: 2, sz: 1 },
     ];
     extraBlocks.forEach(b => {
-      const box = new THREE.Mesh(
-        new THREE.BoxGeometry(...b.size),
-        new THREE.MeshStandardMaterial({ color: b.color })
-      );
-      box.position.set(b.pos[0], b.pos[1], b.pos[2]);
-      box.castShadow = true;
-      box.receiveShadow = true;
-      box.userData = { color: b.color };
-      scene.add(box);
-      mapObjects.push(box);
+      const block = createMinecraftBlock(b.c, b.x, b.y, b.z, b.sx, b.sy, b.sz);
+      scene.add(block);
+      mapObjects.push(block);
+    });
+    
+    // Birkaç "ağaç" (gövde + yaprak)
+    const treePositions = [[7, 5], [-7, -4], [4, -7], [-5, 7]];
+    treePositions.forEach(([tx, tz]) => {
+      // gövde
+      const trunk = createMinecraftBlock(wood, tx, 0.8, tz, 0.8, 2.5, 0.8);
+      scene.add(trunk);
+      mapObjects.push(trunk);
+      // yapraklar
+      const leaf = createMinecraftBlock(leaves, tx, 3.2, tz, 1.5, 1.5, 1.5);
+      scene.add(leaf);
+      mapObjects.push(leaf);
+      const leaf2 = createMinecraftBlock(leaves, tx + 0.8, 2.8, tz, 1.2, 1.2, 1.2);
+      scene.add(leaf2);
+      mapObjects.push(leaf2);
+      const leaf3 = createMinecraftBlock(leaves, tx - 0.8, 2.8, tz, 1.2, 1.2, 1.2);
+      scene.add(leaf3);
+      mapObjects.push(leaf3);
     });
   } else if (mapType === 'ev') {
-    // Ev haritası aynı kalsın
+    // Ev haritası aynen devam (azıcık genişletelim)
     const evBlocks = [
-      { type: 'box', size: [0.5, 0.8, 0.5], pos: [0.5, 0.4, 1], color: 0x8B0000 },
-      { type: 'box', size: [1, 0.3, 1.5], pos: [-1.5, 0.15, 0], color: 0x5C4033 },
-      { type: 'cylinder', radiusTop: 0.3, radiusBottom: 0.3, height: 1.5, pos: [1.2, 0.75, -1], color: 0x708090 },
-      { type: 'sphere', radius: 0.5, pos: [-0.8, 0.5, -1.8], color: 0xFF69B4 },
-      { type: 'box', size: [1.2, 0.6, 0.6], pos: [2, 0.3, 1.5], color: 0x556B2F }
+      { type: 'box', size: [0.8, 1.2, 0.8], pos: [1.5, 0.6, 2], color: 0x8B0000 },
+      { type: 'box', size: [1.5, 0.4, 2], pos: [-2.5, 0.2, 1], color: 0x5C4033 },
+      { type: 'cylinder', radiusTop: 0.4, radiusBottom: 0.4, height: 2, pos: [2, 1, -2], color: 0x708090 },
+      { type: 'sphere', radius: 0.7, pos: [-2, 0.7, -2.5], color: 0xFF69B4 },
+      { type: 'box', size: [1.5, 0.8, 0.8], pos: [3, 0.4, 3], color: 0x556B2F }
     ];
     evBlocks.forEach(obj => {
       let mesh;
@@ -355,12 +427,12 @@ function initScene(mapType) {
   }
 
   myFigure = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.4, 0.6, 2, 8),
+    new THREE.CapsuleGeometry(0.5, 0.8, 2, 8),
     new THREE.MeshStandardMaterial({ color: 0xffffff })
   );
   myFigure.castShadow = true;
   myFigure.receiveShadow = true;
-  myFigure.position.y = 0.7;
+  myFigure.position.y = 0.9;
   scene.add(myFigure);
   remoteFigures = {};
 
@@ -368,17 +440,59 @@ function initScene(mapType) {
   gameInterval = setInterval(fixedUpdate, FIXED_FRAME_MS);
 }
 
+// --- KAMERA SÜRÜKLEME ---
+const cameraDragZone = document.createElement('div');
+cameraDragZone.style.cssText = 'position:absolute; top:0; right:0; width:40%; height:100%; z-index:5; touch-action:none;';
+document.body.appendChild(cameraDragZone);
+
+cameraDragZone.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (e.touches.length === 1) {
+    isDraggingCamera = true;
+    lastTouchX = e.touches[0].clientX;
+  }
+});
+
+cameraDragZone.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (!isDraggingCamera || e.touches.length !== 1) return;
+  const dx = e.touches[0].clientX - lastTouchX;
+  cameraAngle -= dx * 0.01; // hassasiyet
+  lastTouchX = e.touches[0].clientX;
+});
+
+cameraDragZone.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  isDraggingCamera = false;
+});
+
+// PC klavye ile Q/E tuşları
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'q' || e.key === 'Q') {
+    cameraAngle += 0.05;
+  } else if (e.key === 'e' || e.key === 'E') {
+    cameraAngle -= 0.05;
+  }
+});
+
 function fixedUpdate() {
   handleMovement();
-  // Gelişmiş kamera takibi: karakterin arkasında sabit mesafe
-  if (camera && myFigure) {
-    const targetPos = myFigure.position.clone();
-    const cameraOffset = new THREE.Vector3(0, 6, 8); // yukarı ve geriden
-    const desiredPosition = targetPos.clone().add(cameraOffset);
-    camera.position.lerp(desiredPosition, 0.15); // daha hızlı ve yumuşak takip
-    camera.lookAt(targetPos.x, targetPos.y + 0.5, targetPos.z);
-  }
+  updateCameraPosition();
   if (renderer && scene && camera) renderer.render(scene, camera);
+}
+
+function updateCameraPosition() {
+  if (!myFigure) return;
+  const target = myFigure.position.clone();
+  const offsetX = Math.sin(cameraAngle) * CAMERA_DISTANCE;
+  const offsetZ = Math.cos(cameraAngle) * CAMERA_DISTANCE;
+  const desiredPosition = new THREE.Vector3(
+    target.x + offsetX,
+    target.y + CAMERA_HEIGHT,
+    target.z + offsetZ
+  );
+  camera.position.lerp(desiredPosition, 0.15);
+  camera.lookAt(target.x, target.y + 0.5, target.z);
 }
 
 // ---------- Hareket ----------
@@ -400,6 +514,7 @@ window.addEventListener('keyup', e => {
   }
 });
 
+// Joystick (sol)
 const jBase = document.getElementById('joystick-base');
 const jThumb = document.getElementById('joystick-thumb');
 let jActive = false, jVec = { x: 0, z: 0 };
@@ -423,7 +538,7 @@ jBase.addEventListener('touchend', e => {
   jVec.x = 0; jVec.z = 0;
 });
 
-const MOVE_SPEED = 0.12;
+const MOVE_SPEED = 0.15;
 
 function handleMovement() {
   if (!myFigure || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -439,9 +554,9 @@ function handleMovement() {
     dx /= len; dz /= len;
     myFigure.position.x += dx * MOVE_SPEED;
     myFigure.position.z += dz * MOVE_SPEED;
-    const lim = 8;
-    myFigure.position.x = Math.max(-lim, Math.min(lim, myFigure.position.x));
-    myFigure.position.z = Math.max(-lim, Math.min(lim, myFigure.position.z));
+    // Genişletilmiş sınırlar
+    myFigure.position.x = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, myFigure.position.x));
+    myFigure.position.z = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, myFigure.position.z));
     ws.send(JSON.stringify({
       type: 'move',
       x: myFigure.position.x,
@@ -454,7 +569,7 @@ function handleMovement() {
 document.getElementById('btn-pipette').onclick = () => {
   if (!myFigure || frozen) return;
   const pos = myFigure.position;
-  let closestDist = 1.8;
+  let closestDist = 2.2;
   let picked = null;
   mapObjects.forEach(obj => {
     const d = pos.distanceTo(obj.position);
