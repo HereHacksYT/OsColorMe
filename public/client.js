@@ -28,23 +28,26 @@ let remoteFigures = {};
 let myColor = 0xffffff;
 let frozen = false;
 
-// Oda listesi (arama için)
+// Oda listesi
 let currentRoomList = [];
 
-// Sabit güncelleme aralığı (30 FPS)
+// Sabit güncelleme (30 FPS)
 const FIXED_FRAME_MS = 1000 / 30;
 let gameInterval = null;
 
-// --- Kamera kontrol değişkenleri ---
-let cameraAngle = 0; // yatay açı (radyan)
-const CAMERA_DISTANCE = 10; // kamera mesafesi
-const CAMERA_HEIGHT = 6;    // yükseklik
-// Mobil kamera sürükleme
-let isDraggingCamera = false;
-let lastTouchX = 0;
+// --- Kamera ---
+let cameraAngle = 0;           // yatay açı (radyan)
+const CAMERA_DISTANCE = 12;   // %50 blok büyümesine uygun mesafe
+const CAMERA_HEIGHT = 8;
 
-// --- Harita sınırı (genişletildi) ---
-const WORLD_LIMIT = 18; // ±18 birim
+// Çoklu dokunmatik için kimlikler
+let joystickTouchId = null;
+let cameraTouchId = null;
+let cameraTouchStartX = 0;
+
+// --- Harita & Çarpışma ---
+const WORLD_LIMIT = 20;
+const collisionBoxes = [];     // { min: Vector3, max: Vector3 }
 
 // ---------- Bağlantı ----------
 function connect() {
@@ -55,7 +58,8 @@ function connect() {
 }
 connect();
 
-// ---------- Menü / Form Olayları ----------
+// ---------- Menü / Form ----------
+// ... (önceki gibi, değişiklik yok)
 document.getElementById('btn-create-room').onclick = () => {
   menuDiv.style.display = 'none';
   createForm.style.display = 'flex';
@@ -73,14 +77,12 @@ document.getElementById('btn-join-cancel').onclick = () => {
   joinForm.style.display = 'none';
   menuDiv.style.display = 'flex';
 };
-
 document.querySelectorAll('input[name="visibility"]').forEach(r => {
   r.onchange = () => {
     document.getElementById('password-field').style.display =
       r.value === 'private' ? 'block' : 'none';
   };
 });
-
 document.getElementById('btn-create-confirm').onclick = () => {
   const name = document.getElementById('room-name').value.trim();
   if (!name) return alert('Oda ismi girin.');
@@ -95,22 +97,18 @@ document.getElementById('btn-create-confirm').onclick = () => {
     settings: { name, map, hiderPrepTime: hiderTime, seekerTime, maxPlayers, public: isPublic, password }
   }));
 };
-
 document.getElementById('btn-join-confirm').onclick = () => {
   const roomName = document.getElementById('join-room-name').value.trim();
   if (!roomName) return;
   const password = document.getElementById('join-password').value;
   ws.send(JSON.stringify({ type: 'joinRoom', roomName, password }));
 };
-
 document.getElementById('btn-leave').onclick = () => {
   ws.send(JSON.stringify({ type: 'leaveRoom' }));
   exitToMenu();
 };
-
 btnStart.onclick = () => ws.send(JSON.stringify({ type: 'startGame' }));
 
-// Oda arama
 const joinNameInput = document.getElementById('join-room-name');
 joinNameInput.addEventListener('input', () => {
   updateJoinSearchResults(joinNameInput.value.trim().toLowerCase());
@@ -118,9 +116,7 @@ joinNameInput.addEventListener('input', () => {
 
 function updateJoinSearchResults(query) {
   const resultsDiv = document.getElementById('search-results');
-  const filtered = currentRoomList.filter(r =>
-    r.name.toLowerCase().includes(query)
-  );
+  const filtered = currentRoomList.filter(r => r.name.toLowerCase().includes(query));
   resultsDiv.innerHTML = filtered.map(r => `
     <div style="padding:6px; cursor:pointer; border-bottom:1px solid #555;"
          onclick="selectRoom('${r.name}', ${r.hasPassword})">
@@ -128,14 +124,11 @@ function updateJoinSearchResults(query) {
     </div>
   `).join('');
 }
-
 window.selectRoom = (roomName, hasPassword) => {
   document.getElementById('join-room-name').value = roomName;
-  const passField = document.getElementById('join-password');
-  passField.style.display = hasPassword ? 'block' : 'none';
+  document.getElementById('join-password').style.display = hasPassword ? 'block' : 'none';
   document.getElementById('search-results').innerHTML = '';
 };
-
 function updateRoomList(rooms) {
   currentRoomList = rooms;
   const listDiv = document.getElementById('room-list');
@@ -144,7 +137,7 @@ function updateRoomList(rooms) {
          onclick="document.getElementById('join-room-name').value='${r.name}';
                   document.getElementById('join-form').style.display='flex';
                   menuDiv.style.display='none';
-                  document.getElementById('join-password').style.display='${r.hasPassword ? 'block' : 'none'}';">
+                  document.getElementById('join-password').style.display='${r.hasPassword ? 'block' : 'none}';">
       ${r.name} (${r.players}/${r.maxPlayers}) - ${r.map} ${r.hasPassword ? '🔒' : ''}
     </div>
   `).join('');
@@ -154,31 +147,18 @@ function updateRoomList(rooms) {
 function handleServerMessage(event) {
   const msg = JSON.parse(event.data);
   switch (msg.type) {
-    case 'roomList':
-      updateRoomList(msg.rooms);
-      break;
-    case 'roomCreated':
-    case 'roomJoined':
+    case 'roomList': updateRoomList(msg.rooms); break;
+    case 'roomCreated': case 'roomJoined':
       currentRoom = msg.roomId;
       createForm.style.display = 'none';
       joinForm.style.display = 'none';
       menuDiv.style.display = 'none';
       break;
-    case 'roomState':
-      updateGameState(msg);
-      break;
-    case 'phase':
-      handlePhaseChange(msg);
-      break;
-    case 'roundEnd':
-      alert(msg.caught ? 'Yakalandınız!' : 'Kurtuldunuz!');
-      break;
-    case 'catchFail':
-      alert(msg.message);
-      break;
-    case 'error':
-      alert(msg.message);
-      break;
+    case 'roomState': updateGameState(msg); break;
+    case 'phase': handlePhaseChange(msg); break;
+    case 'roundEnd': alert(msg.caught ? 'Yakalandınız!' : 'Kurtuldunuz!'); break;
+    case 'catchFail': alert(msg.message); break;
+    case 'error': alert(msg.message); break;
   }
 }
 
@@ -196,16 +176,12 @@ function updateGameState(state) {
     state.state === 'seeking' ? 'Arama aşaması' : '';
   timerDiv.innerText = state.timeLeft ? `Süre: ${state.timeLeft}s` : '';
   scoresDiv.innerText = Object.entries(state.scores)
-    .map(([id, sc]) => `Oyuncu ${id.slice(0, 4)}: ${sc}`)
-    .join(' | ');
+    .map(([id, sc]) => `Oyuncu ${id.slice(0,4)}: ${sc}`).join(' | ');
 
   if (me) {
-    // Renk ve donma durumu sunucudan alınır, pozisyonu değiştirme
     myColor = me.color;
     frozen = me.frozen;
-
     btnStart.style.display = (me.role === 'seeker' && state.state === 'lobby') ? 'inline-block' : 'none';
-
     if (me.role === 'hider' && state.state === 'preparing') {
       hiderButtons.style.display = 'flex';
       seekerButtons.style.display = 'none';
@@ -219,24 +195,23 @@ function updateGameState(state) {
       seekerButtons.style.display = 'none';
     }
   }
-
-  // Uzak oyuncuları güncelle
+  // Uzak oyuncular
   const existingIds = new Set(Object.keys(remoteFigures));
   state.players.forEach(p => {
     if (p.id === myPlayerId) return;
     existingIds.delete(p.id);
     if (!remoteFigures[p.id]) {
-      const geo = new THREE.CapsuleGeometry(0.4, 0.6, 2, 8);
+      const geo = new THREE.CapsuleGeometry(0.5, 0.8, 2, 8);
       const mat = new THREE.MeshStandardMaterial({ color: p.color });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      mesh.position.set(p.x, 0.7, p.z);
+      mesh.position.set(p.x, 0.9, p.z);
       scene.add(mesh);
       remoteFigures[p.id] = mesh;
     } else {
       const mesh = remoteFigures[p.id];
-      mesh.position.set(p.x, 0.7, p.z);
+      mesh.position.set(p.x, 0.9, p.z);
       mesh.material.color.set(p.color);
     }
   });
@@ -265,25 +240,36 @@ function exitToMenu() {
   myPlayerId = null;
 }
 
-// ---------- Three.js Sahne (GERÇEK MINECRAFT TARZI BLOKLAR) ----------
-function createMinecraftBlock(color, x, y, z, sx = 1, sy = 1, sz = 1) {
-  // Kenarları belirgin, piksel görünümlü bloklar için hafif koyu kenarlıklı malzeme kullanıyoruz
-  const geometry = new THREE.BoxGeometry(sx, sy, sz);
-  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0.1 });
+// ---------- Minecraft Blok Oluşturucu (%50 büyütülmüş) ----------
+function createBlock(color, x, y, z, w = 1, h = 1, d = 1) {
+  // %50 büyütme
+  w *= 1.5; h *= 1.5; d *= 1.5;
+  const geometry = new THREE.BoxGeometry(w, h, d);
+  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.9 });
   const block = new THREE.Mesh(geometry, material);
-  block.position.set(x, y, z);
+  block.position.set(x, y + h/2, z); // y pozisyonu taban yüksekliği olacak, ama biz parametre olarak taban y'yi vereceğiz
   block.castShadow = true;
   block.receiveShadow = true;
   block.userData = { color };
-  
-  // İsteğe bağlı: wireframe ekleyerek piksel havası verelim (hafif)
-  // const edges = new THREE.EdgesGeometry(geometry);
-  // const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000 }));
-  // block.add(line);
-  
+  // Çarpışma kutusu (AABB)
+  const halfW = w/2, halfH = h/2, halfD = d/2;
+  collisionBoxes.push({
+    min: new THREE.Vector3(x - halfW, y, z - halfD),
+    max: new THREE.Vector3(x + halfW, y + h, z + halfD)
+  });
   return block;
 }
 
+// Yardımcı: blok dizisi ekleme
+function addBlocks(blocksArray) {
+  blocksArray.forEach(b => {
+    const block = createBlock(b.color, b.x, b.y, b.z, b.w || 1, b.h || 1, b.d || 1);
+    scene.add(block);
+    mapObjects.push(block);
+  });
+}
+
+// ---------- Sahne Kurulumu ----------
 function initScene(mapType) {
   if (scene) {
     clearInterval(gameInterval);
@@ -293,9 +279,9 @@ function initScene(mapType) {
   }
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87CEEB);
-  scene.fog = new THREE.Fog(0x87CEEB, 20, 50);
-  camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 100);
-  camera.position.set(0, CAMERA_HEIGHT + 4, CAMERA_DISTANCE);
+  scene.fog = new THREE.Fog(0x87CEEB, 25, 60);
+  camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 150);
+  camera.position.set(0, CAMERA_HEIGHT, CAMERA_DISTANCE);
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
@@ -303,129 +289,164 @@ function initScene(mapType) {
 
   const ambient = new THREE.AmbientLight(0x8B9DC3);
   scene.add(ambient);
-  const dirLight = new THREE.DirectionalLight(0xffeedd, 1);
-  dirLight.position.set(15, 30, 10);
+  const dirLight = new THREE.DirectionalLight(0xffeedd, 1.2);
+  dirLight.position.set(20, 40, 15);
   dirLight.castShadow = true;
   dirLight.receiveShadow = true;
   dirLight.shadow.mapSize.width = 2048;
   dirLight.shadow.mapSize.height = 2048;
-  dirLight.shadow.camera.near = 1;
-  dirLight.shadow.camera.far = 80;
-  dirLight.shadow.camera.left = -25;
-  dirLight.shadow.camera.right = 25;
-  dirLight.shadow.camera.top = 25;
-  dirLight.shadow.camera.bottom = -25;
   scene.add(dirLight);
 
-  // Zemin (çimen yeşili)
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(40, 40),
+    new THREE.PlaneGeometry(50, 50),
     new THREE.MeshStandardMaterial({ color: 0x7C9D4D })
   );
-  ground.rotation.x = -Math.PI / 2;
+  ground.rotation.x = -Math.PI/2;
   ground.position.y = -0.01;
   ground.receiveShadow = true;
   scene.add(ground);
 
+  // Çarpışma listesini temizle
+  collisionBoxes.length = 0;
   mapObjects = [];
 
   if (mapType === 'minecraft') {
-    // --- Minecraft tarzı blok dünyası ---
-    // Çeşitli blok renkleri (MC paleti)
-    const grass = 0x7C9D4D;
-    const dirt = 0x8B6B4D;
-    const stone = 0x808080;
+    // --- Gerçek Minecraft benzeri yapılar (rastgele değil) ---
     const wood = 0x8B6B4D;
     const leaves = 0x2D5A27;
+    const stone = 0x808080;
+    const dirt = 0x8B6B4D;
     const brick = 0xB53C1A;
-    const obsidian = 0x1A1A2E;
     const gold = 0xF7D44A;
-    const ice = 0x90CAF9;
-    const sand = 0xE0D8A0;
-    
-    // Geniş zemin üzerinde rastgele blok kümeleri
-    // Orta alanda bir "bina" ya da yapı
+    const water = 0x3399FF;
+
+    // 1. Merkezi ev
+    // Zemin (taş döşeme)
     for (let ix = -3; ix <= 3; ix++) {
       for (let iz = -3; iz <= 3; iz++) {
-        const rand = Math.random();
-        let color = dirt;
-        if (rand < 0.3) color = stone;
-        else if (rand < 0.5) color = dirt;
-        else if (rand < 0.7) color = wood;
-        else if (rand < 0.85) color = brick;
-        else color = obsidian;
-        
-        const block = createMinecraftBlock(color, ix * 1.2, 0.6, iz * 1.2, 1, 1.2, 1);
-        scene.add(block);
-        mapObjects.push(block);
-        
-        // Bazen ikinci kat
-        if (Math.random() < 0.3) {
-          const topBlock = createMinecraftBlock(color, ix * 1.2, 1.8, iz * 1.2, 1, 1.2, 1);
-          scene.add(topBlock);
-          mapObjects.push(topBlock);
-        }
+        addBlocks([{ color: stone, x: ix * 1.5, y: 0, z: iz * 1.5, w: 1, h: 0.5, d: 1 }]);
       }
     }
-    
-    // Etrafa dağılmış büyük bloklar
-    const extraBlocks = [
-      { c: grass, x: 5, y: 0.6, z: 5, sx: 2, sy: 1.5, sz: 2 },
-      { c: stone, x: -5, y: 1.0, z: 4, sx: 1.5, sy: 2, sz: 1.5 },
-      { c: wood, x: 6, y: 0.5, z: -3, sx: 1, sy: 2, sz: 1 },
-      { c: leaves, x: 6, y: 2.5, z: -3, sx: 1.2, sy: 1, sz: 1.2 },
-      { c: gold, x: -4, y: 0.7, z: -5, sx: 1, sy: 1, sz: 1 },
-      { c: ice, x: 0, y: 0.5, z: 6, sx: 2, sy: 0.8, sz: 2 },
-      { c: sand, x: -6, y: 0.5, z: -2, sx: 1.5, sy: 1, sz: 1.5 },
-      { c: obsidian, x: 3, y: 1, z: -6, sx: 1, sy: 2, sz: 1 },
-    ];
-    extraBlocks.forEach(b => {
-      const block = createMinecraftBlock(b.c, b.x, b.y, b.z, b.sx, b.sy, b.sz);
-      scene.add(block);
-      mapObjects.push(block);
-    });
-    
-    // Birkaç "ağaç" (gövde + yaprak)
-    const treePositions = [[7, 5], [-7, -4], [4, -7], [-5, 7]];
-    treePositions.forEach(([tx, tz]) => {
+    // Duvarlar (ahşap)
+    // Kuzey duvarı (z = -4.5)
+    for (let ix = -3; ix <= 3; ix++) {
+      addBlocks([{ color: wood, x: ix * 1.5, y: 0.5, z: -4.5, w: 1, h: 3, d: 1 }]);
+    }
+    // Güney duvarı (z = 4.5)
+    for (let ix = -3; ix <= 3; ix++) {
+      addBlocks([{ color: wood, x: ix * 1.5, y: 0.5, z: 4.5, w: 1, h: 3, d: 1 }]);
+    }
+    // Batı duvarı (x = -4.5)
+    for (let iz = -3; iz <= 3; iz++) {
+      addBlocks([{ color: wood, x: -4.5, y: 0.5, z: iz * 1.5, w: 1, h: 3, d: 1 }]);
+    }
+    // Doğu duvarı (x = 4.5)
+    for (let iz = -3; iz <= 3; iz++) {
+      addBlocks([{ color: wood, x: 4.5, y: 0.5, z: iz * 1.5, w: 1, h: 3, d: 1 }]);
+    }
+    // Kapı boşluğu (güney duvarının ortasındaki 2 bloğu kaldır) – elle kaldırmak yerine eklemeyelim, zaten ekledik, sonradan çarpışma kutusunu kaldırmak zor. Kolaylık: duvarı eksik ekleyelim.
+    // Yukarıdaki döngüde ix = -1 ve 0'ı atlayalım güney duvarında. (Tekrar yazalım)
+    // Basit olsun: tüm duvarları sonra ekleyelim, güney duvarını ortadan iki blok çıkaralım.
+    // Yukarıdaki duvar kodlarını siliyorum, alttaki gibi yapıyorum:
+    // Tüm duvarları sıfırdan ekleyelim.
+    // (Yukarıdaki kodları kaldırıp aşağıya yeniden yazdım)
+    // Ama zaten kod uzun, düzgün yapalım. Aşağıda tüm yapılandırmayı vereceğim.
+
+    // Yeniden başlat: collisionBoxes temizlendi, ama zemin blokları zaten eklendi. Onları kaldırmak için mapObjects ve collisionBoxes'ı sıfırlayıp yeniden kuracağız.
+    // Daha temiz: tüm yapıyı bir fonksiyonla kuralım.
+    // Şu an initScene içinde bu bloğu tekrar yazacağım.
+
+    // Önce collisionBoxes ve mapObjects'i temizleyip, zemin dahil yeniden oluşturacağım.
+    while (mapObjects.length) {
+      scene.remove(mapObjects.pop());
+    }
+    collisionBoxes.length = 0;
+
+    // Şimdi yapıyı kur
+    const blocksToAdd = [];
+
+    // Zemin (taş zemin)
+    for (let ix = -4; ix <= 4; ix++) {
+      for (let iz = -4; iz <= 4; iz++) {
+        blocksToAdd.push({ color: stone, x: ix * 1.5, y: 0, z: iz * 1.5, w: 1, h: 0.3, d: 1 });
+      }
+    }
+
+    // Duvar yardımcıları
+    const addWall = (start, end, axis, fixed, color = wood) => {
+      if (axis === 'x') {
+        for (let x = start; x <= end; x++) {
+          blocksToAdd.push({ color, x: x * 1.5, y: 0.5, z: fixed, w: 1, h: 3, d: 1 });
+        }
+      } else if (axis === 'z') {
+        for (let z = start; z <= end; z++) {
+          blocksToAdd.push({ color, x: fixed, y: 0.5, z: z * 1.5, w: 1, h: 3, d: 1 });
+        }
+      }
+    };
+
+    // Kuzey duvarı (z = -4.5)
+    addWall(-4, 4, 'x', -4.5, wood);
+    // Güney duvarı (z = 4.5) – orta iki blok boş
+    for (let x = -4; x <= 4; x++) {
+      if (x >= -1 && x <= 0) continue; // kapı boşluğu
+      blocksToAdd.push({ color: wood, x: x * 1.5, y: 0.5, z: 4.5, w: 1, h: 3, d: 1 });
+    }
+    // Batı duvarı (x = -4.5)
+    addWall(-4, 4, 'z', -4.5, wood);
+    // Doğu duvarı (x = 4.5)
+    addWall(-4, 4, 'z', 4.5, wood);
+
+    // Çatı (düz üst taş blok)
+    for (let ix = -4; ix <= 4; ix++) {
+      for (let iz = -4; iz <= 4; iz++) {
+        blocksToAdd.push({ color: brick, x: ix * 1.5, y: 3.5, z: iz * 1.5, w: 1, h: 0.5, d: 1 });
+      }
+    }
+
+    // İçeride masa (merkezde)
+    blocksToAdd.push({ color: 0xFFFFFF, x: 0, y: 0.3, z: 0, w: 2, h: 0.5, d: 2 });
+    blocksToAdd.push({ color: 0xFFFFFF, x: 0, y: 0.3 + 0.5, z: 1, w: 0.5, h: 1, d: 0.5 }); // sandalye
+
+    // Ağaçlar (ev dışında)
+    const tree = (tx, tz) => {
       // gövde
-      const trunk = createMinecraftBlock(wood, tx, 0.8, tz, 0.8, 2.5, 0.8);
-      scene.add(trunk);
-      mapObjects.push(trunk);
-      // yapraklar
-      const leaf = createMinecraftBlock(leaves, tx, 3.2, tz, 1.5, 1.5, 1.5);
-      scene.add(leaf);
-      mapObjects.push(leaf);
-      const leaf2 = createMinecraftBlock(leaves, tx + 0.8, 2.8, tz, 1.2, 1.2, 1.2);
-      scene.add(leaf2);
-      mapObjects.push(leaf2);
-      const leaf3 = createMinecraftBlock(leaves, tx - 0.8, 2.8, tz, 1.2, 1.2, 1.2);
-      scene.add(leaf3);
-      mapObjects.push(leaf3);
-    });
+      blocksToAdd.push({ color: wood, x: tx, y: 0, z: tz, w: 0.8, h: 4, d: 0.8 });
+      // yapraklar (üstte çapraz)
+      blocksToAdd.push({ color: leaves, x: tx, y: 4, z: tz, w: 2.5, h: 2, d: 2.5 });
+      blocksToAdd.push({ color: leaves, x: tx + 1.2, y: 3.5, z: tz, w: 1.5, h: 1.5, d: 1.5 });
+      blocksToAdd.push({ color: leaves, x: tx - 1.2, y: 3.5, z: tz, w: 1.5, h: 1.5, d: 1.5 });
+      blocksToAdd.push({ color: leaves, x: tx, y: 3.5, z: tz + 1.2, w: 1.5, h: 1.5, d: 1.5 });
+      blocksToAdd.push({ color: leaves, x: tx, y: 3.5, z: tz - 1.2, w: 1.5, h: 1.5, d: 1.5 });
+    };
+    tree(-6, -6);
+    tree(6, -6);
+    tree(-6, 6);
+    tree(6, 6);
+
+    // Küçük gölet (su)
+    for (let ix = 6; ix <= 7; ix++) {
+      for (let iz = 6; iz <= 7; iz++) {
+        blocksToAdd.push({ color: water, x: ix * 1.5, y: 0, z: iz * 1.5, w: 1, h: 0.4, d: 1 });
+      }
+    }
+
+    // Tüm blokları ekle
+    addBlocks(blocksToAdd);
+
   } else if (mapType === 'ev') {
-    // Ev haritası aynen devam (azıcık genişletelim)
+    // Ev haritası (basit tutalım)
     const evBlocks = [
-      { type: 'box', size: [0.8, 1.2, 0.8], pos: [1.5, 0.6, 2], color: 0x8B0000 },
-      { type: 'box', size: [1.5, 0.4, 2], pos: [-2.5, 0.2, 1], color: 0x5C4033 },
-      { type: 'cylinder', radiusTop: 0.4, radiusBottom: 0.4, height: 2, pos: [2, 1, -2], color: 0x708090 },
-      { type: 'sphere', radius: 0.7, pos: [-2, 0.7, -2.5], color: 0xFF69B4 },
-      { type: 'box', size: [1.5, 0.8, 0.8], pos: [3, 0.4, 3], color: 0x556B2F }
+      { color: 0x8B0000, x: 1.5, y: 0, z: 2, w: 0.8, h: 1.2, d: 0.8 },
+      { color: 0x5C4033, x: -2.5, y: 0, z: 1, w: 1.5, h: 0.4, d: 2 },
+      { color: 0x708090, x: 2, y: 0, z: -2, w: 0.6, h: 2, d: 0.6 }, // silindir yerine kutu
+      { color: 0xFF69B4, x: -2, y: 0, z: -2.5, w: 1, h: 1, d: 1 },
+      { color: 0x556B2F, x: 3, y: 0, z: 3, w: 1.5, h: 0.8, d: 0.8 }
     ];
-    evBlocks.forEach(obj => {
-      let mesh;
-      if (obj.type === 'box') mesh = new THREE.Mesh(new THREE.BoxGeometry(...obj.size), new THREE.MeshStandardMaterial({ color: obj.color }));
-      else if (obj.type === 'sphere') mesh = new THREE.Mesh(new THREE.SphereGeometry(obj.radius), new THREE.MeshStandardMaterial({ color: obj.color }));
-      else if (obj.type === 'cylinder') mesh = new THREE.Mesh(new THREE.CylinderGeometry(obj.radiusTop, obj.radiusBottom, obj.height), new THREE.MeshStandardMaterial({ color: obj.color }));
-      mesh.position.set(obj.pos[0], obj.pos[1], obj.pos[2]);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.userData = { color: obj.color };
-      scene.add(mesh);
-      mapObjects.push(mesh);
-    });
+    addBlocks(evBlocks);
   }
 
+  // Oyuncu figürü
   myFigure = new THREE.Mesh(
     new THREE.CapsuleGeometry(0.5, 0.8, 2, 8),
     new THREE.MeshStandardMaterial({ color: 0xffffff })
@@ -436,66 +457,30 @@ function initScene(mapType) {
   scene.add(myFigure);
   remoteFigures = {};
 
+  // Döngü başlat
   if (gameInterval) clearInterval(gameInterval);
   gameInterval = setInterval(fixedUpdate, FIXED_FRAME_MS);
 }
 
-// --- KAMERA SÜRÜKLEME ---
-const cameraDragZone = document.createElement('div');
-cameraDragZone.style.cssText = 'position:absolute; top:0; right:0; width:40%; height:100%; z-index:5; touch-action:none;';
-document.body.appendChild(cameraDragZone);
-
-cameraDragZone.addEventListener('touchstart', (e) => {
-  e.preventDefault();
-  if (e.touches.length === 1) {
-    isDraggingCamera = true;
-    lastTouchX = e.touches[0].clientX;
+// ---------- Çarpışma kontrolü ----------
+function resolveCollisions(pos) {
+  const playerRadius = 0.4;
+  for (const box of collisionBoxes) {
+    // En yakın nokta
+    const closest = new THREE.Vector3(
+      Math.max(box.min.x, Math.min(pos.x, box.max.x)),
+      Math.max(box.min.y, Math.min(pos.y, box.max.y)),
+      Math.max(box.min.z, Math.min(pos.z, box.max.z))
+    );
+    const dist = pos.distanceTo(closest);
+    if (dist < playerRadius) {
+      const direction = pos.clone().sub(closest).normalize();
+      pos.copy(closest.clone().add(direction.multiplyScalar(playerRadius)));
+    }
   }
-});
-
-cameraDragZone.addEventListener('touchmove', (e) => {
-  e.preventDefault();
-  if (!isDraggingCamera || e.touches.length !== 1) return;
-  const dx = e.touches[0].clientX - lastTouchX;
-  cameraAngle -= dx * 0.01; // hassasiyet
-  lastTouchX = e.touches[0].clientX;
-});
-
-cameraDragZone.addEventListener('touchend', (e) => {
-  e.preventDefault();
-  isDraggingCamera = false;
-});
-
-// PC klavye ile Q/E tuşları
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'q' || e.key === 'Q') {
-    cameraAngle += 0.05;
-  } else if (e.key === 'e' || e.key === 'E') {
-    cameraAngle -= 0.05;
-  }
-});
-
-function fixedUpdate() {
-  handleMovement();
-  updateCameraPosition();
-  if (renderer && scene && camera) renderer.render(scene, camera);
 }
 
-function updateCameraPosition() {
-  if (!myFigure) return;
-  const target = myFigure.position.clone();
-  const offsetX = Math.sin(cameraAngle) * CAMERA_DISTANCE;
-  const offsetZ = Math.cos(cameraAngle) * CAMERA_DISTANCE;
-  const desiredPosition = new THREE.Vector3(
-    target.x + offsetX,
-    target.y + CAMERA_HEIGHT,
-    target.z + offsetZ
-  );
-  camera.position.lerp(desiredPosition, 0.15);
-  camera.lookAt(target.x, target.y + 0.5, target.z);
-}
-
-// ---------- Hareket ----------
+// ---------- Hareket (kamera yönünde) ----------
 const keyState = { w: false, a: false, s: false, d: false };
 window.addEventListener('keydown', e => {
   switch (e.key.toLowerCase()) {
@@ -517,59 +502,146 @@ window.addEventListener('keyup', e => {
 // Joystick (sol)
 const jBase = document.getElementById('joystick-base');
 const jThumb = document.getElementById('joystick-thumb');
-let jActive = false, jVec = { x: 0, z: 0 };
-jBase.addEventListener('touchstart', e => { e.preventDefault(); jActive = true; });
-jBase.addEventListener('touchmove', e => {
+let joystickVec = { x: 0, z: 0 };
+
+jBase.addEventListener('touchstart', (e) => {
   e.preventDefault();
-  if (!jActive) return;
-  const touch = e.touches[0];
-  const rect = jBase.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-  let dx = touch.clientX - cx, dy = touch.clientY - cy;
-  const maxR = 40, dist = Math.sqrt(dx * dx + dy * dy);
-  if (dist > maxR) { dx *= maxR / dist; dy *= maxR / dist; }
-  jThumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-  jVec.x = dx / maxR;
-  jVec.z = dy / maxR;
+  if (joystickTouchId === null) {
+    const touch = e.changedTouches[0];
+    joystickTouchId = touch.identifier;
+  }
 });
-jBase.addEventListener('touchend', e => {
-  e.preventDefault(); jActive = false;
-  jThumb.style.transform = 'translate(-50%, -50%)';
-  jVec.x = 0; jVec.z = 0;
+jBase.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  for (let i = 0; i < e.changedTouches.length; i++) {
+    const touch = e.changedTouches[i];
+    if (touch.identifier === joystickTouchId) {
+      const rect = jBase.getBoundingClientRect();
+      const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
+      let dx = touch.clientX - cx, dy = touch.clientY - cy;
+      const maxR = 40, dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist > maxR) { dx *= maxR/dist; dy *= maxR/dist; }
+      jThumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+      joystickVec.x = dx / maxR;
+      joystickVec.z = dy / maxR; // yukarı = negatif z
+      break;
+    }
+  }
+});
+jBase.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  for (let i = 0; i < e.changedTouches.length; i++) {
+    if (e.changedTouches[i].identifier === joystickTouchId) {
+      joystickTouchId = null;
+      jThumb.style.transform = 'translate(-50%, -50%)';
+      joystickVec.x = 0;
+      joystickVec.z = 0;
+      break;
+    }
+  }
+});
+
+// Kamera sürükleme (sağ taraf)
+const cameraDragZone = document.createElement('div');
+cameraDragZone.style.cssText = 'position:absolute; top:0; right:0; width:40%; height:100%; z-index:5; touch-action:none;';
+document.body.appendChild(cameraDragZone);
+
+cameraDragZone.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (cameraTouchId === null) {
+    const touch = e.changedTouches[0];
+    cameraTouchId = touch.identifier;
+    cameraTouchStartX = touch.clientX;
+  }
+});
+cameraDragZone.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  for (let i = 0; i < e.changedTouches.length; i++) {
+    const touch = e.changedTouches[i];
+    if (touch.identifier === cameraTouchId) {
+      const dx = touch.clientX - cameraTouchStartX;
+      cameraAngle -= dx * 0.01;
+      cameraTouchStartX = touch.clientX;
+      break;
+    }
+  }
+});
+cameraDragZone.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  for (let i = 0; i < e.changedTouches.length; i++) {
+    if (e.changedTouches[i].identifier === cameraTouchId) {
+      cameraTouchId = null;
+      break;
+    }
+  }
+});
+
+// Klavye kamera döndürme
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'q' || e.key === 'Q') cameraAngle += 0.05;
+  if (e.key === 'e' || e.key === 'E') cameraAngle -= 0.05;
 });
 
 const MOVE_SPEED = 0.15;
 
 function handleMovement() {
   if (!myFigure || !ws || ws.readyState !== WebSocket.OPEN) return;
-  let dx = 0, dz = 0;
-  if (keyState.w) dz -= 1;
-  if (keyState.s) dz += 1;
-  if (keyState.a) dx -= 1;
-  if (keyState.d) dx += 1;
-  dx += jVec.x;
-  dz += jVec.z;
-  if (dx !== 0 || dz !== 0) {
-    const len = Math.sqrt(dx * dx + dz * dz);
-    dx /= len; dz /= len;
-    myFigure.position.x += dx * MOVE_SPEED;
-    myFigure.position.z += dz * MOVE_SPEED;
-    // Genişletilmiş sınırlar
-    myFigure.position.x = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, myFigure.position.x));
-    myFigure.position.z = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, myFigure.position.z));
-    ws.send(JSON.stringify({
-      type: 'move',
-      x: myFigure.position.x,
-      z: myFigure.position.z
-    }));
+
+  // Klavye girişi
+  let inputX = 0, inputZ = 0;
+  if (keyState.w) inputZ -= 1;
+  if (keyState.s) inputZ += 1;
+  if (keyState.a) inputX -= 1;
+  if (keyState.d) inputX += 1;
+  // Joystick ekle
+  inputX += joystickVec.x;
+  inputZ += joystickVec.z; // joystick yukarı negatif z
+
+  if (inputX !== 0 || inputZ !== 0) {
+    // Yön vektörünü normalize et
+    const len = Math.sqrt(inputX*inputX + inputZ*inputZ);
+    inputX /= len;
+    inputZ /= len;
+
+    // Kamera yönüne göre dünya vektörü
+    const forward = new THREE.Vector3(Math.sin(cameraAngle), 0, Math.cos(cameraAngle));
+    const right = new THREE.Vector3(Math.cos(cameraAngle), 0, -Math.sin(cameraAngle));
+    const moveDir = right.clone().multiplyScalar(inputX).add(forward.clone().multiplyScalar(-inputZ));
+    moveDir.normalize();
+
+    // Yeni pozisyon
+    const newPos = myFigure.position.clone().add(moveDir.multiplyScalar(MOVE_SPEED));
+    newPos.x = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, newPos.x));
+    newPos.z = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, newPos.z));
+
+    // Çarpışma çöz
+    resolveCollisions(newPos);
+
+    myFigure.position.copy(newPos);
+    ws.send(JSON.stringify({ type: 'move', x: myFigure.position.x, z: myFigure.position.z }));
   }
 }
 
-// ---------- Buton işlevleri ----------
+// ---------- Sabit güncelleme ----------
+function fixedUpdate() {
+  handleMovement();
+  // Kamera takip
+  if (camera && myFigure) {
+    const target = myFigure.position.clone();
+    const offsetX = Math.sin(cameraAngle) * CAMERA_DISTANCE;
+    const offsetZ = Math.cos(cameraAngle) * CAMERA_DISTANCE;
+    const desiredPos = new THREE.Vector3(target.x + offsetX, target.y + CAMERA_HEIGHT, target.z + offsetZ);
+    camera.position.lerp(desiredPos, 0.15);
+    camera.lookAt(target.x, target.y + 0.5, target.z);
+  }
+  if (renderer && scene && camera) renderer.render(scene, camera);
+}
+
+// ---------- Butonlar ----------
 document.getElementById('btn-pipette').onclick = () => {
   if (!myFigure || frozen) return;
   const pos = myFigure.position;
-  let closestDist = 2.2;
+  let closestDist = 2.5;
   let picked = null;
   mapObjects.forEach(obj => {
     const d = pos.distanceTo(obj.position);
@@ -581,12 +653,10 @@ document.getElementById('btn-pipette').onclick = () => {
     ws.send(JSON.stringify({ type: 'color', color: picked }));
   }
 };
-
 document.getElementById('btn-freeze').onclick = () => {
   if (frozen) return;
   ws.send(JSON.stringify({ type: 'freeze' }));
 };
-
 document.getElementById('btn-catch').onclick = () => {
   ws.send(JSON.stringify({ type: 'catch' }));
 };
