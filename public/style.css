@@ -18,7 +18,6 @@ canvas {
   z-index: 0;
 }
 
-/* === Ortak arka plan görseli === */
 #menu, #create-form, #join-form {
   background-image: url('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSYt9EC2e74iGkR0ZTTXDpJNmACAJHJvLc7fuQM--LieA&s=10');
   background-size: cover;
@@ -26,7 +25,6 @@ canvas {
   background-repeat: no-repeat;
 }
 
-/* Menü */
 #menu {
   flex-direction: column;
   align-items: center;
@@ -70,15 +68,13 @@ canvas {
   pointer-events: auto;
 }
 
-/* Formlar */
 #create-form, #join-form {
-  background-color: rgba(0, 0, 0, 0.75); /* Görsel üstüne hafif koyuluk */
+  background-color: rgba(0, 0, 0, 0.75);
   background-blend-mode: darken;
   z-index: 200;
   pointer-events: auto;
 }
 
-/* Oyun içi üst bar */
 #top-bar {
   position: absolute;
   top: 10px;
@@ -95,7 +91,6 @@ canvas {
   align-items: center;
 }
 
-/* Rol butonları */
 #hider-buttons, #seeker-buttons {
   position: absolute;
   bottom: 140px;
@@ -106,7 +101,6 @@ canvas {
   gap: 10px;
 }
 
-/* Joystick */
 #joystick-container {
   position: absolute;
   bottom: 40px;
@@ -134,7 +128,6 @@ canvas {
   transform: translate(-50%, -50%);
 }
 
-/* Genel buton stili */
 button, input, select {
   font-size: 16px;
   padding: 10px 14px;
