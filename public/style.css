@@ -8,7 +8,6 @@ body {
   overflow: hidden;
   touch-action: none;
   font-family: 'Segoe UI', Arial, sans-serif;
-  /* Arka plan resmi doğrudan body'de değil, menu div'inde olacak */
 }
 
 canvas {
@@ -19,12 +18,16 @@ canvas {
   z-index: 0;
 }
 
-/* === Ana Menü (Arka plan resmi) === */
-#menu {
+/* === Ortak arka plan görseli === */
+#menu, #create-form, #join-form {
   background-image: url('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSYt9EC2e74iGkR0ZTTXDpJNmACAJHJvLc7fuQM--LieA&s=10');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
+}
+
+/* Menü */
+#menu {
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -40,7 +43,6 @@ canvas {
   text-shadow: 3px 3px 0 #000;
 }
 
-/* Ana menü butonları */
 #menu button {
   font-size: 1.3em;
   padding: 15px 30px;
@@ -70,7 +72,8 @@ canvas {
 
 /* Formlar */
 #create-form, #join-form {
-  background: rgba(0, 0, 0, 0.9);
+  background-color: rgba(0, 0, 0, 0.75); /* Görsel üstüne hafif koyuluk */
+  background-blend-mode: darken;
   z-index: 200;
   pointer-events: auto;
 }
