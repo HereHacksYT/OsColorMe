@@ -1,7 +1,22 @@
 {
   "name": "oscolorme",
   "version": "1.0.0",
+  "description": "OsColorMe - Manuel Kamuflaj ve Saklambaç Oyunu",
   "main": "server.js",
-  "scripts": { "start": "node server.js" },
-  "dependencies": { "express": "^4.18.2", "ws": "^8.14.2", "uuid": "^9.0.0" }
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "multiplayer",
+    "game",
+    "socket.io",
+    "express",
+    "camouflage"
+  ],
+  "author": "Osman",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
 }
