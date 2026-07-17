@@ -1,33 +1,101 @@
-* { margin:0; padding:0; box-sizing:border-box; }
-body { overflow:hidden; touch-action:none; font-family:'Segoe UI', Arial, sans-serif; }
-canvas { display:block; position:fixed; top:0; left:0; z-index:0; }
-
-#menu, #create-form, #join-form {
-  background-image: url('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSYt9EC2e74iGkR0ZTTXDpJNmACAJHJvLc7fuQM--LieA&s=10');
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
-#menu { flex-direction:column; align-items:center; justify-content:center; height:100vh; color:white; gap:20px; display:flex; }
-#menu h1 { font-size:3em; text-shadow:3px 3px 0 #000; }
-#menu button { font-size:1.3em; padding:15px 30px; background:rgba(0,0,0,0.7); border:2px solid white; color:white; cursor:pointer; border-radius:10px; }
-#room-list { max-height:200px; overflow-y:auto; width:300px; text-align:left; background:rgba(0,0,0,0.8); border-radius:10px; padding:8px; color:white; }
-
-#create-form, #join-form {
-  flex-direction:column; gap:12px; padding:20px; border-radius:12px;
-  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-  z-index:20; color:white; min-width:280px; background-color:rgba(0,0,0,0.75);
-  background-blend-mode:darken;
+body, html {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #111;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
-#top-bar { position:absolute; top:10px; left:10px; color:white; text-shadow:1px 1px 2px black; z-index:50; display:flex; gap:12px; flex-wrap:wrap; background:rgba(0,0,0,0.6); padding:6px 12px; border-radius:8px; align-items:center; }
-#hider-buttons, #seeker-buttons { position:absolute; bottom:140px; right:20px; z-index:100; display:flex; flex-direction:column; gap:10px; }
-#joystick-container { position:absolute; bottom:40px; left:40px; width:120px; height:120px; z-index:100; }
-#joystick-base { width:100%; height:100%; background:rgba(255,255,255,0.15); border-radius:50%; border:2px solid rgba(255,255,255,0.4); position:relative; }
-#joystick-thumb { width:50px; height:50px; background:rgba(255,255,255,0.6); border-radius:50%; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); }
+#game-container {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+}
 
-button, input, select { font-size:16px; padding:10px 14px; border-radius:10px; border:none; background:rgba(255,255,255,0.2); color:white; backdrop-filter:blur(4px); }
-button { cursor:pointer; background:rgba(70,130,200,0.8); }
-button:active { background:rgba(70,130,200,1); }
-input, select { background:rgba(255,255,255,0.9); color:black; }
+/* Sağ Kenardaki Manuel Renk Paleti Arayüzü */
+#ui-panel {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    background: rgba(0, 0, 0, 0.85);
+    color: white;
+    padding: 15px;
+    border-radius: 12px;
+    border: 2px solid #555;
+    z-index: 10;
+    width: 260px;
+    pointer-events: auto;
+}
+
+#ui-panel h3 {
+    font-size: 16px;
+    margin-bottom: 5px;
+    text-align: center;
+    color: #00ffcc;
+}
+
+#ui-panel p {
+    font-size: 11px;
+    margin-bottom: 15px;
+    text-align: center;
+    color: #ccc;
+}
+
+.color-picker-group {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.color-picker-group label {
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.color-picker-group input[type="color"] {
+    border: none;
+    width: 45px;
+    height: 30px;
+    border-radius: 4px;
+    cursor: pointer;
+    background: none;
+}
+
+/* Sol Alt Köşedeki Mobil Joystick */
+#joystick-zone {
+    position: absolute;
+    bottom: 30px;
+    left: 30px;
+    width: 120px;
+    height: 120px;
+    background: rgba(255, 255, 255, 0.15);
+    border: 3px solid rgba(255, 255, 255, 0.4);
+    border-radius: 50%;
+    z-index: 10;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    touch-action: none;
+}
+
+#joystick-knob {
+    width: 50px;
+    height: 50px;
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    position: relative;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    transition: transform 0.05s linear;
+}
