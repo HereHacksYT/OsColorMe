@@ -1,74 +1,44 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, touch-action: manipulation"/>
-  <title>OsColorMe</title>
-  <link rel="stylesheet" href="style.css"/>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OsColorMe - 3D Manuel Kamuflaj</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="menu">
-  <h1>OsColorMe</h1>
-  <button onclick="showCreateForm()">Oda Oluştur</button>
-  <button onclick="showJoinForm()">Odaya Katıl</button>
-  <div id="room-list"></div>
-</div>
+    <!-- Oyun 3D Render Alanı -->
+    <div id="game-container"></div>
 
-<div id="create-form" style="display:none">
-  <h3>Oda Oluştur</h3>
-  <input id="room-name" placeholder="Oda İsmi" maxlength="20"/>
-  <select id="map-select"><option value="minecraft">Minecraft</option><option value="ev">Ev</option></select>
-  <label>Hazırlık Süresi (sn): <input id="hider-time" type="number" value="20" min="10" max="120"/></label>
-  <label>Arama Süresi (sn): <input id="seeker-time" type="number" value="45" min="20" max="180"/></label>
-  <label>Max Oyuncu: <input id="max-players" type="number" value="4" min="2" max="8"/></label>
-  <div>
-    <label>Açık: <input type="radio" name="visibility" value="public" checked/></label>
-    <label>Kapalı: <input type="radio" name="visibility" value="private"/></label>
-  </div>
-  <div id="password-field" style="display:none"><input id="room-password" placeholder="Şifre" type="password"/></div>
-  <button onclick="createRoom()">Oluştur</button>
-  <button onclick="hideCreateForm()">İptal</button>
-</div>
+    <!-- Mobil Sanal Joystick -->
+    <div id="joystick-zone">
+        <div id="joystick-knob"></div>
+    </div>
 
-<div id="join-form" style="display:none">
-  <h3>Odaya Katıl</h3>
-  <input id="join-room-name" placeholder="Oda ismi ara..." autocomplete="off"/>
-  <div id="search-results"></div>
-  <input id="join-password" placeholder="Şifre (gerekliyse)" type="password" style="display:none"/>
-  <button onclick="joinRoom()">Katıl</button>
-  <button onclick="hideJoinForm()">İptal</button>
-</div>
+    <!-- UI Kontrol Paneli: Manuel Renk Boyama Alanı -->
+    <div id="ui-panel">
+        <h3>OsColorMe Kamuflaj Paleti</h3>
+        <p>Arandaki nesneye göre bölgelerini manuel boya!</p>
+        
+        <div class="color-picker-group">
+            <label for="picker-head">🤠 Kafa Rengi:</label>
+            <input type="color" id="picker-head" value="#ffffff">
+        </div>
+        
+        <div class="color-picker-group">
+            <label for="picker-body">👕 Gövde Rengi:</label>
+            <input type="color" id="picker-body" value="#ffffff">
+        </div>
+        
+        <div class="color-picker-group">
+            <label for="picker-legs">👖 Bacak Rengi:</label>
+            <input type="color" id="picker-legs" value="#ffffff">
+        </div>
+    </div>
 
-<div id="game-ui" style="display:none">
-  <div id="top-bar">
-    <span id="status-text"></span>
-    <span id="timer"></span>
-    <span id="scores"></span>
-    <button id="btn-start" style="display:none">Başlat</button>
-    <button id="btn-leave">Çık</button>
-  </div>
-  <div id="hider-buttons" style="display:none">
-    <button id="btn-pipette">🎨 Pipetle</button>
-    <button id="btn-freeze">🧊 Don</button>
-  </div>
-  <div id="seeker-buttons" style="display:none">
-    <button id="btn-shoot">🏹 Ateş Et</button>
-  </div>
-  <div id="joystick-container">
-    <div id="joystick-base"><div id="joystick-thumb"></div></div>
-  </div>
-</div>
-
-<script>
-  function showCreateForm() { document.getElementById('menu').style.display='none'; document.getElementById('create-form').style.display='flex'; }
-  function hideCreateForm() { document.getElementById('create-form').style.display='none'; document.getElementById('menu').style.display='flex'; }
-  function showJoinForm() { document.getElementById('menu').style.display='none'; document.getElementById('join-form').style.display='flex'; if(typeof updateJoinSearchResults==='function') updateJoinSearchResults(''); }
-  function hideJoinForm() { document.getElementById('join-form').style.display='none'; document.getElementById('menu').style.display='flex'; }
-</script>
-
-<script type="importmap">
-  { "imports": { "three": "https://unpkg.com/three@0.157.0/build/three.module.js" } }
-</script>
-<script src="client.js" type="module"></script>
+    <!-- Socket.io ve Three.js Bağımlılıkları -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="main.js"></script>
 </body>
 </html>
